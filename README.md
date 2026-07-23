@@ -58,35 +58,45 @@ flowchart TD
 
 ## 🚀 快速开始 (Quick Start)
 
-### 1. 安装依赖
+所有脚本均内置了智能默认参数，您可以直接零参数运行，也可以通过命令行参数自定义模型与路径。
+
+### 环境准备
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 步骤 1：导出待删除 Token 清单
-运行 `export_delete_tokens.py` 分析模型词表，自动提取非目标语言 Token 列表输出到 `delete_tokens.txt`：
+### 步骤 1：导出待删除 Token 清单
+直接运行（自动使用默认模型 `Qwen/Qwen2.5-0.5B-Instruct`）：
 ```bash
-python3 export_delete_tokens.py --model Qwen/Qwen2.5-0.5B-Instruct --output delete_tokens.txt
+python3 export_delete_tokens.py
+```
+*或指定自定义模型名称/本地路径：*
+```bash
+python3 export_delete_tokens.py --model google/gemma-3-270m --output delete_tokens.txt
 ```
 
-### 3. 步骤 2：检查清单（可选）
+### 步骤 2：检查清单（可选）
 用文本编辑器打开 `delete_tokens.txt`。如果其中某些 Token 您希望保留，只需删除该行即可。
 
-### 4. 步骤 3：执行模型裁剪、导出与自动前后对比
-运行 `prune_model_by_txt.py` 读取清单文件，自动完成权重切片、分词器规则更新、原生模型导出，并**自动打印裁剪前/后的参数瘦身表格与对话质量对比**：
+### 步骤 3：执行模型裁剪、导出与自动验证
+直接运行（自动读取 `delete_tokens.txt`，切片矩阵并自动跑推理验证）：
+```bash
+python3 prune_model_by_txt.py
+```
+*或自定义模型与导出目录：*
 ```bash
 python3 prune_model_by_txt.py \
-    --model Qwen/Qwen2.5-0.5B-Instruct \
+    --model google/gemma-3-270m \
     --delete_txt delete_tokens.txt \
-    --output ./qwen2.5-pruned-model
+    --output ./gemma-270m-pruned-model
 ```
 
-### 5. 步骤 4：加载裁剪后的新模型
+### 步骤 4：加载裁剪后的新模型
 导出后的模型可以直接像 Hugging Face 官方模型一样原生加载，无需任何修改：
 ```python
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-model_path = "./qwen2.5-pruned-model"
+model_path = "./qwen2.5-pruned-by-txt"
 tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(model_path, device_map="auto", trust_remote_code=True)
 
