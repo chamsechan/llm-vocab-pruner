@@ -1,0 +1,20 @@
+# PyTorch & Hugging Face Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ds_store
+
+# Saved Models & Weights
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+qwen2.5-*
+gemma-*
+pruned_model*
+*.log
+
+# Generated TXT Cache
+delete_tokens.txt
