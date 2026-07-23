@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """
-步骤 1：分析词表并将需删除的非目标语言 Token、代码缩进及 HTML 标签导出到 TXT 文件中
-(Script 1: Export Foreign Language & Code Tokens to Delete to a TXT File)
+步骤 1：分析词表并将需删除的非目标语言 Token、冷门生辟英文/人名/地名、代码缩进及 HTML 标签导出到 TXT 文件中
+(Script 1: Export Foreign Language, Rare English Words & Code Tokens to Delete to a TXT File)
 
 使用方法：
-python3 export_delete_tokens.py --model Qwen/Qwen2.5-0.5B-Instruct --output delete_tokens.txt --filter_code
+python3 export_delete_tokens.py --model Qwen/Qwen2.5-0.5B-Instruct --output delete_tokens.txt --min_english_freq 3.0
 """
 
 import re
 import argparse
 from transformers import AutoTokenizer
 
-def export_delete_tokens(model_name_or_path, output_txt_path, filter_code=True):
+try:
+    import wordfreq
+    HAS_WORDFREQ = True
+except ImportError:
+    HAS_WORDFREQ = False
+
+def export_delete_tokens(model_name_or_path, output_txt_path, filter_code=True, min_english_freq=3.0):
     print(f"=== 1. 加载 Tokenizer: {model_name_or_path} ===")
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
     vocab = tokenizer.get_vocab() # token_str -> token_id
@@ -38,7 +44,9 @@ def export_delete_tokens(model_name_or_path, output_txt_path, filter_code=True):
         if token_id < 256:
             continue
 
-        # 检查外语字符
+        clean_token = token_str.strip(" \u2581")
+
+        # 规则 A: 检查外语扩展字符
         is_foreign = False
         try:
             decoded_str = tokenizer.decode([token_id], skip_special_tokens=False, errors="ignore")
@@ -47,12 +55,21 @@ def export_delete_tokens(model_name_or_path, output_txt_path, filter_code=True):
         except Exception:
             pass
 
-        # 检查代码/缩进/HTML 标签
+        # 规则 B: 检查代码/缩进/HTML 标签
         is_code = False
         if filter_code and code_pattern.search(token_str):
             is_code = True
 
-        if is_foreign or is_code:
+        # 规则 C: 检查生辟冷门英文单词、冷门人名/地名 (按 Zipf 词频过滤)
+        is_rare_english = False
+        if HAS_WORDFREQ and min_english_freq > 0.0:
+            if clean_token.isalpha() and len(clean_token) > 2:
+                # 计算英文 Zipf 词频
+                freq = wordfreq.zipf_frequency(clean_token.lower(), "en")
+                if freq > 0 and freq < min_english_freq:
+                    is_rare_english = True
+
+        if is_foreign or is_code or is_rare_english:
             delete_tokens.append((token_id, repr(token_str)))
 
     # 按 Token ID 升序排列
@@ -60,14 +77,14 @@ def export_delete_tokens(model_name_or_path, output_txt_path, filter_code=True):
 
     print(f"\n--- 统计分析结果 ---")
     print(f"词表总大小: {len(vocab)}")
-    print(f"标记待删除 Token 数量 (含外语及代码专有符号): {len(delete_tokens)}")
+    print(f"标记待删除 Token 数量 (含外语、生辟英文及代码符): {len(delete_tokens)}")
     print(f"拟精简 Token 占比: {(len(delete_tokens) / len(vocab)) * 100:.2f}%")
 
     # 导出到 TXT 文件
     print(f"\n正在导出删除清单到: {output_txt_path}")
     with open(output_txt_path, "w", encoding="utf-8") as f:
         f.write(f"# 待删除 Token 清单 (共 {len(delete_tokens)} 个)\n")
-        f.write("# 包含非目标外语字符、代码缩进及 HTML 专有标签\n")
+        f.write(f"# 筛选规则: 非目标外语字符 + 代码专有块 + 英文词频 < {min_english_freq} (Zipf)\n")
         f.write("# 格式: Token_ID \\t 原始 Token 字符串\n")
         for tid, tstr in delete_tokens:
             f.write(f"{tid}\t{tstr}\n")
@@ -79,9 +96,10 @@ def main():
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="模型名称或本地路径")
     parser.add_argument("--output", type=str, default="delete_tokens.txt", help="导出的 TXT 文件路径")
     parser.add_argument("--filter_code", action="store_true", default=True, help="是否一并过滤代码缩进、HTML 标签等代码专有 Token")
+    parser.add_argument("--min_english_freq", type=float, default=3.0, help="英文词频低于此阈值(Zipf, 默认 3.0)的冷门生辟词将被过滤")
     args = parser.parse_args()
 
-    export_delete_tokens(args.model, args.output, filter_code=args.filter_code)
+    export_delete_tokens(args.model, args.output, filter_code=args.filter_code, min_english_freq=args.min_english_freq)
 
 if __name__ == "__main__":
     main()
