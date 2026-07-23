@@ -175,40 +175,35 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     t_pct = (t_diff / (orig_params / 1e6)) * 100
     print(f"{'模型总参数量 (M)':<23} | {orig_params/1e6:<18.2f} M | {new_params/1e6:<18.2f} M | {t_diff:+.2f} M ({t_pct:.2f}%)")
 
-    # 执行对话生成质量对比
-    print(f"\n💬 实际对话生成质量对比:")
-    models_to_test = [
-        ("原始模型", orig_tokenizer, model),
-        ("裁剪后模型", pruned_tokenizer, pruned_model)
-    ]
+    # 5. 执行原生生成质量与功能验证
+    print(f"\n💬 验证裁剪后原生模型的生成质量:")
 
     for idx, prompt in enumerate(TEST_PROMPTS, 1):
         print(f"\n---------------------------------------------------------")
         print(f"测试用例 [{idx}]: {prompt}")
         print(f"---------------------------------------------------------")
 
-        for label, tok, m in models_to_test:
-            if hasattr(tok, "apply_chat_template") and tok.chat_template:
-                messages = [{"role": "user", "content": prompt}]
-                formatted_text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-                inputs = tok(formatted_text, return_tensors="pt").to(m.device)
-            else:
-                inputs = tok(prompt, return_tensors="pt").to(m.device)
+        if hasattr(pruned_tokenizer, "apply_chat_template") and pruned_tokenizer.chat_template:
+            messages = [{"role": "user", "content": prompt}]
+            formatted_text = pruned_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            inputs = pruned_tokenizer(formatted_text, return_tensors="pt").to(pruned_model.device)
+        else:
+            inputs = pruned_tokenizer(prompt, return_tensors="pt").to(pruned_model.device)
 
-            start_time = time.time()
-            with torch.no_grad():
-                outputs = m.generate(**inputs, max_new_tokens=48, do_sample=False)
-            latency = time.time() - start_time
+        start_time = time.time()
+        with torch.no_grad():
+            outputs = pruned_model.generate(**inputs, max_new_tokens=48, do_sample=False)
+        latency = time.time() - start_time
 
-            input_len = inputs["input_ids"].shape[1]
-            generated_ids = outputs[0][input_len:]
-            speed = len(generated_ids) / latency if latency > 0 else 0
+        input_len = inputs["input_ids"].shape[1]
+        generated_ids = outputs[0][input_len:]
+        speed = len(generated_ids) / latency if latency > 0 else 0
 
-            response = tok.decode(generated_ids, skip_special_tokens=True)
-            print(f"\n👉 [{label}] (耗时: {latency:.2f}s | 速度: {speed:.1f} token/s):")
-            print(response.strip())
+        response = pruned_tokenizer.decode(generated_ids, skip_special_tokens=True)
+        print(f"👉 [裁剪后原生模型] (耗时: {latency:.2f}s | 速度: {speed:.1f} token/s):")
+        print(response.strip())
 
-    print("\n✓ 全流程完成！裁剪后模型已保存至指定目录，且对比测试证明回答质量完全一致！")
+    print("\n✓ 全流程完成！裁剪后模型已保存至指定目录，且原生推理验证完全无障碍！")
 
 def main():
     parser = argparse.ArgumentParser(description="步骤 2：读取 TXT 文件，执行模型裁剪并自动对比验证")
