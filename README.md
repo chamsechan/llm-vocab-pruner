@@ -72,8 +72,8 @@ python3 export_delete_tokens.py --model Qwen/Qwen2.5-0.5B-Instruct --output dele
 ### 3. 步骤 2：检查清单（可选）
 用文本编辑器打开 `delete_tokens.txt`。如果其中某些 Token 您希望保留，只需删除该行即可。
 
-### 4. 步骤 3：执行模型裁剪与原生导出
-运行 `prune_model_by_txt.py` 读取清单文件，完成权重矩阵切片、分词器规则更新与原生模型保存：
+### 4. 步骤 3：执行模型裁剪、导出与自动前后对比
+运行 `prune_model_by_txt.py` 读取清单文件，自动完成权重切片、分词器规则更新、原生模型导出，并**自动打印裁剪前/后的参数瘦身表格与对话质量对比**：
 ```bash
 python3 prune_model_by_txt.py \
     --model Qwen/Qwen2.5-0.5B-Instruct \
@@ -81,15 +81,7 @@ python3 prune_model_by_txt.py \
     --output ./qwen2.5-pruned-model
 ```
 
-### 5. 步骤 4：裁剪前/后效果与性能对比
-运行对比脚本，直观比较原始模型与裁剪模型的**参数削减幅度**、**推理延迟/速度**及**中文/英文回答质量**：
-```bash
-python3 compare_before_after.py \
-    --original Qwen/Qwen2.5-0.5B-Instruct \
-    --pruned ./qwen2.5-pruned-model
-```
-
-### 6. 步骤 5：加载裁剪后的新模型
+### 5. 步骤 4：加载裁剪后的新模型
 导出后的模型可以直接像 Hugging Face 官方模型一样原生加载，无需任何修改：
 ```python
 from transformers import AutoTokenizer, AutoModelForCausalLM
