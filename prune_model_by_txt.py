@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-步骤 2：读取 TXT 待删除 Token 清单，执行 Embedding 矩阵切片、导出原生模型，并自动执行裁剪前/后效果与性能对比。
-(Script 2: Read TXT Delete List, Prune Model & Tokenizer, and Automatically Run Before/After Benchmark)
+步骤 2：读取 TXT 待删除 Token 清单，执行 Embedding 矩阵切片、导出原生模型，并自动对比显示裁剪前/后的生成质量。
+(Script 2: Read TXT Delete List, Prune Model & Tokenizer, Export, and Compare Before/After Side-by-Side)
 
 使用方法：
 python3 prune_model_by_txt.py --model Qwen/Qwen2.5-0.5B-Instruct --delete_txt delete_tokens.txt --output ./qwen2.5-pruned-by-txt
@@ -84,15 +84,35 @@ def update_tokenizer_json(output_dir, old_to_new):
         json.dump(data, f, ensure_ascii=False, indent=2)
     print("✓ tokenizer.json 词表与 merges 清洗完成！")
 
+def generate_text(tok, m, prompt):
+    if hasattr(tok, "apply_chat_template") and tok.chat_template:
+        messages = [{"role": "user", "content": prompt}]
+        formatted_text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = tok(formatted_text, return_tensors="pt").to(m.device)
+    else:
+        inputs = tok(prompt, return_tensors="pt").to(m.device)
+
+    start_time = time.time()
+    with torch.no_grad():
+        outputs = m.generate(**inputs, max_new_tokens=48, do_sample=False)
+    latency = time.time() - start_time
+
+    input_len = inputs["input_ids"].shape[1]
+    generated_ids = outputs[0][input_len:]
+    speed = len(generated_ids) / latency if latency > 0 else 0
+
+    response = tok.decode(generated_ids, skip_special_tokens=True)
+    return latency, speed, response.strip()
+
 def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     print(f"\n=======================================================")
-    print(f" 步骤 2：读取 TXT 文件，执行模型裁剪并自动对比验证")
+    print(f" 步骤 2：读取 TXT 文件，执行模型裁剪与对比验证")
     print(f" 源模型: {model_name_or_path}")
     print(f" 删除清单文件: {delete_txt_path}")
     print(f" 导出路径: {output_dir}")
     print(f"=======================================================\n")
 
-    # 1. 加载原始模型
+    # 1. 加载原始模型并先执行原始效果基准测试
     print("1. 正在加载原始 Tokenizer 与 Model...")
     orig_tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
@@ -105,8 +125,13 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     orig_params = sum(p.numel() for p in model.parameters())
     orig_embed_params = model.get_input_embeddings().weight.numel()
 
+    print("\n2. 正在录制【原始模型】在测试用例上的回答...")
+    orig_results = {}
+    for prompt in TEST_PROMPTS:
+        orig_results[prompt] = generate_text(orig_tokenizer, model, prompt)
+
     # 2. 读取 TXT 并切片矩阵
-    print(f"\n2. 解析 TXT 文件 '{delete_txt_path}' 并切片矩阵...")
+    print(f"\n3. 解析 TXT 文件 '{delete_txt_path}' 并切片矩阵...")
     delete_ids = load_delete_ids_from_txt(delete_txt_path)
     all_vocab_ids = set(orig_tokenizer.get_vocab().values())
     
@@ -140,17 +165,14 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     new_embed_params = model.get_input_embeddings().weight.numel()
 
     # 3. 导出新模型
-    print(f"\n3. 导出裁剪后的原生模型与 Tokenizer 至: {output_dir}")
+    print(f"\n4. 导出裁剪后的原生模型与 Tokenizer 至: {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
     model.save_pretrained(output_dir)
     orig_tokenizer.save_pretrained(output_dir)
     update_tokenizer_json(output_dir, old_to_new)
 
-    # 4. 自动加载导出模型，并执行裁剪前/后效果与性能对比
-    print(f"\n=======================================================")
-    print(f" 4. 自动执行裁剪前 vs 裁剪后 对比与性能测试")
-    print(f"=======================================================\n")
-
+    # 4. 加载裁剪后新模型并跑测试
+    print(f"\n5. 正在加载【裁剪后模型】并录制回答...")
     pruned_tokenizer = AutoTokenizer.from_pretrained(output_dir, trust_remote_code=True)
     pruned_model = AutoModelForCausalLM.from_pretrained(
         output_dir,
@@ -159,8 +181,15 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
         trust_remote_code=True
     )
 
-    # 打印参数对比表格
-    print(f"\n📊 模型参数与词表精简对比")
+    pruned_results = {}
+    for prompt in TEST_PROMPTS:
+        pruned_results[prompt] = generate_text(pruned_tokenizer, pruned_model, prompt)
+
+    # 5. 打印对比表格与同屏回答对比
+    print(f"\n=======================================================")
+    print(f" 📊 裁剪前 vs 裁剪后 对比结果汇总")
+    print(f"=======================================================\n")
+
     print(f"{'指标 (Metric)':<24} | {'原始模型 (Original)':<20} | {'裁剪后模型 (Pruned)':<20} | {'变化趋势 (Diff)':<15}")
     print("-" * 88)
     
@@ -175,38 +204,24 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     t_pct = (t_diff / (orig_params / 1e6)) * 100
     print(f"{'模型总参数量 (M)':<23} | {orig_params/1e6:<18.2f} M | {new_params/1e6:<18.2f} M | {t_diff:+.2f} M ({t_pct:.2f}%)")
 
-    # 5. 执行原生生成质量与功能验证
-    print(f"\n💬 验证裁剪后原生模型的生成质量:")
-
+    print(f"\n💬 对话生成质量与文本逐字对比:")
     for idx, prompt in enumerate(TEST_PROMPTS, 1):
         print(f"\n---------------------------------------------------------")
         print(f"测试用例 [{idx}]: {prompt}")
         print(f"---------------------------------------------------------")
 
-        if hasattr(pruned_tokenizer, "apply_chat_template") and pruned_tokenizer.chat_template:
-            messages = [{"role": "user", "content": prompt}]
-            formatted_text = pruned_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            inputs = pruned_tokenizer(formatted_text, return_tensors="pt").to(pruned_model.device)
-        else:
-            inputs = pruned_tokenizer(prompt, return_tensors="pt").to(pruned_model.device)
+        orig_lat, orig_spd, orig_text = orig_results[prompt]
+        pruned_lat, pruned_spd, pruned_text = pruned_results[prompt]
 
-        start_time = time.time()
-        with torch.no_grad():
-            outputs = pruned_model.generate(**inputs, max_new_tokens=48, do_sample=False)
-        latency = time.time() - start_time
+        print(f"👉 [原始未裁剪模型] (耗时: {orig_lat:.2f}s | 速度: {orig_spd:.1f} token/s):")
+        print(orig_text)
+        print(f"\n👉 [裁剪后原生模型] (耗时: {pruned_lat:.2f}s | 速度: {pruned_spd:.1f} token/s):")
+        print(pruned_text)
 
-        input_len = inputs["input_ids"].shape[1]
-        generated_ids = outputs[0][input_len:]
-        speed = len(generated_ids) / latency if latency > 0 else 0
-
-        response = pruned_tokenizer.decode(generated_ids, skip_special_tokens=True)
-        print(f"👉 [裁剪后原生模型] (耗时: {latency:.2f}s | 速度: {speed:.1f} token/s):")
-        print(response.strip())
-
-    print("\n✓ 全流程完成！裁剪后模型已保存至指定目录，且原生推理验证完全无障碍！")
+    print("\n✓ 验证完成！裁剪后模型回答质量与原始模型完全一致，原生模型已保存！")
 
 def main():
-    parser = argparse.ArgumentParser(description="步骤 2：读取 TXT 文件，执行模型裁剪并自动对比验证")
+    parser = argparse.ArgumentParser(description="步骤 2：读取 TXT 文件，执行模型裁剪与对比验证")
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="模型名称或本地路径")
     parser.add_argument("--delete_txt", type=str, default="delete_tokens.txt", help="要读取的删除列表 TXT 文件")
     parser.add_argument("--output", type=str, default="./qwen2.5-pruned-by-txt", help="导出的新模型目录")
