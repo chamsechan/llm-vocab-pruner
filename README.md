@@ -42,16 +42,16 @@
 ## 🛠️ 工作流与原理 (Architecture)
 
 ```mermaid
-graph TD
-    A[原始 LLM 模型 & Tokenizer] --> B[Step 1: export_delete_tokens.py]
-    B --> C[生成 delete_tokens.txt 删除清单]
-    C --> D{人工审查 / 微调清单 (可选)}
-    D --> E[Step 2: prune_model_by_txt.py]
-    E --> F[嵌入层 & LM Head 矩阵切片]
-    E --> G[重排 tokenizer.json & 清洗 merges]
-    F --> H[原生裁剪模型目录 ./pruned_model]
+flowchart TD
+    A["原始 LLM 模型与 Tokenizer"] --> B["Step 1: export_delete_tokens.py"]
+    B --> C["生成 delete_tokens.txt 删除清单"]
+    C --> D{"人工审查与微调清单 (可选)"}
+    D --> E["Step 2: prune_model_by_txt.py"]
+    E --> F["嵌入层与 LM Head 矩阵切片"]
+    E --> G["重排 tokenizer.json 与清洗 merges"]
+    F --> H["原生裁剪模型目录 ./pruned_model"]
     G --> H
-    H --> I[原生零映射加载推理 AutoModelForCausalLM]
+    H --> I["原生零映射加载推理 AutoModelForCausalLM"]
 ```
 
 ---
