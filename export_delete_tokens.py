@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-步骤 1：分析词表并将需删除的非目标语言 Token 列表导出到 TXT 文件中
-(Script 1: Export Tokens to Delete to a TXT File)
+步骤 1：分析词表并将需删除的非目标语言 Token、代码缩进及 HTML 标签导出到 TXT 文件中
+(Script 1: Export Foreign Language & Code Tokens to Delete to a TXT File)
 
 使用方法：
-python3 export_delete_tokens.py --model Qwen/Qwen2.5-0.5B-Instruct --output delete_tokens.txt
+python3 export_delete_tokens.py --model Qwen/Qwen2.5-0.5B-Instruct --output delete_tokens.txt --filter_code
 """
 
 import re
 import argparse
 from transformers import AutoTokenizer
 
-def export_delete_tokens(model_name_or_path, output_txt_path):
+def export_delete_tokens(model_name_or_path, output_txt_path, filter_code=True):
     print(f"=== 1. 加载 Tokenizer: {model_name_or_path} ===")
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
     vocab = tokenizer.get_vocab() # token_str -> token_id
@@ -21,53 +21,67 @@ def export_delete_tokens(model_name_or_path, output_txt_path):
     if hasattr(tokenizer, "added_tokens_encoder"):
         special_token_ids.update(tokenizer.added_tokens_encoder.values())
 
-    # 外语字符集匹配正则 (阿拉伯语、拉丁扩展/法语/德语重音、西里尔字母、希腊语、泰语等)
-    foreign_char_pattern = re.compile(r'[\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF\u0600-\u06FF\u0E00-\u0E7F]')
+    # 外语字符集匹配正则 (阿拉伯语、拉丁扩展/法语/德语重音、西里尔字母、希腊语、泰语、日韩假名谚文等)
+    foreign_char_pattern = re.compile(r'[\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF\u0600-\u06FF\u0E00-\u0E7F\u3040-\u30FF\uAC00-\uD7AF]')
+
+    # 代码专项匹配正则 (代码缩进如连续空格、HTML/XML标签、编程关键字/符号)
+    code_pattern = re.compile(r'(^[\s\u2581]{2,})|(<[a-zA-Z0-9_\-\/]+>)|(self\.)|(std::)|(__[a-zA-Z0-9_]+__)|([a-zA-Z0-9_]+\(\))|(href=)|(class=)')
 
     delete_tokens = [] # [(token_id, token_str)]
 
     for token_str, token_id in vocab.items():
-        # 安全规则 1: 绝对不删 Special Tokens (如 <|im_start|>)
+        # 安全规则 1: 绝对不删 Special Tokens (如 <|im_start|>, <eos>, <pad>)
         if token_id in special_token_ids:
             continue
 
-        # 安全规则 2: 绝对不删 基础 Byte 和控制节点 (ID < 256)，防止 BPE 崩溃
+        # 安全规则 2: 绝对不删 基础 Byte 和控制节点 (ID < 256)，防止 BPE/SentencePiece 崩溃
         if token_id < 256:
             continue
 
-        # 判断解出字符是否属于要剔除的外语扩展字符
+        # 检查外语字符
+        is_foreign = False
         try:
             decoded_str = tokenizer.decode([token_id], skip_special_tokens=False, errors="ignore")
             if decoded_str and foreign_char_pattern.search(decoded_str):
-                delete_tokens.append((token_id, repr(decoded_str)))
+                is_foreign = True
         except Exception:
             pass
+
+        # 检查代码/缩进/HTML 标签
+        is_code = False
+        if filter_code and code_pattern.search(token_str):
+            is_code = True
+
+        if is_foreign or is_code:
+            delete_tokens.append((token_id, repr(token_str)))
 
     # 按 Token ID 升序排列
     delete_tokens.sort(key=lambda x: x[0])
 
     print(f"\n--- 统计分析结果 ---")
     print(f"词表总大小: {len(vocab)}")
-    print(f"标记待删除 Token 数量: {len(delete_tokens)}")
+    print(f"标记待删除 Token 数量 (含外语及代码专有符号): {len(delete_tokens)}")
     print(f"拟精简 Token 占比: {(len(delete_tokens) / len(vocab)) * 100:.2f}%")
 
     # 导出到 TXT 文件
     print(f"\n正在导出删除清单到: {output_txt_path}")
     with open(output_txt_path, "w", encoding="utf-8") as f:
         f.write(f"# 待删除 Token 清单 (共 {len(delete_tokens)} 个)\n")
-        f.write("# 格式: Token_ID \\t 解码文本\n")
+        f.write("# 包含非目标外语字符、代码缩进及 HTML 专有标签\n")
+        f.write("# 格式: Token_ID \\t 原始 Token 字符串\n")
         for tid, tstr in delete_tokens:
             f.write(f"{tid}\t{tstr}\n")
 
-    print(f"✓ 导出完成！您可以手动打开 '{output_txt_path}' 检查或修改需要删除的 Token。")
+    print(f"✓ 导出完成！您可以手动打开 '{output_txt_path}' 检查或微调需要删除的 Token。")
 
 def main():
     parser = argparse.ArgumentParser(description="步骤 1：导出拟删除 Token 列表到 TXT 文件")
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="模型名称或本地路径")
     parser.add_argument("--output", type=str, default="delete_tokens.txt", help="导出的 TXT 文件路径")
+    parser.add_argument("--filter_code", action="store_true", default=True, help="是否一并过滤代码缩进、HTML 标签等代码专有 Token")
     args = parser.parse_args()
 
-    export_delete_tokens(args.model, args.output)
+    export_delete_tokens(args.model, args.output, filter_code=args.filter_code)
 
 if __name__ == "__main__":
     main()
