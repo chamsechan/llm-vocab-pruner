@@ -56,6 +56,30 @@ def select_output_token_ids(tokenizer, input_vocab_size, delete_ids):
 
     return sorted(model_vocab_ids - set(delete_ids)), sorted(ignored_ids)
 
+
+def validate_exported_model(model):
+    """Fail fast if the reloaded model is not truly asymmetric and untied."""
+    if model.config.tie_word_embeddings is not False:
+        raise RuntimeError("导出模型的 tie_word_embeddings 必须为 false。")
+
+    input_weight = model.get_input_embeddings().weight
+    output_weight = model.get_output_embeddings().weight
+    if input_weight is output_weight:
+        raise RuntimeError("导出模型的 Embedding 与 LM Head 仍在共享 Parameter。")
+
+    expected_output_size = model.config.output_vocab_size
+    if output_weight.shape[0] != expected_output_size:
+        raise RuntimeError(
+            "LM Head 行数与 output_vocab_size 不一致: "
+            f"{output_weight.shape[0]} != {expected_output_size}"
+        )
+
+    print(
+        "✓ 结构校验通过: tie_word_embeddings=false, "
+        f"Embedding={tuple(input_weight.shape)}, "
+        f"LM Head={tuple(output_weight.shape)}, 权重未共享。"
+    )
+
 def generate_text(tok, m, prompt):
     if hasattr(tok, "apply_chat_template") and tok.chat_template:
         messages = [{"role": "user", "content": prompt}]
@@ -138,6 +162,7 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
         device_map="auto" if torch.cuda.is_available() else None,
         trust_remote_code=True
     )
+    validate_exported_model(pruned_model)
 
     pruned_results = {}
     for prompt in TEST_PROMPTS:

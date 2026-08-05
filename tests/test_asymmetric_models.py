@@ -1,3 +1,5 @@
+import json
+import os
 import tempfile
 import unittest
 
@@ -32,6 +34,7 @@ class AsymmetricModelContract:
         convert_to_asymmetric_output_vocab(model, keep)
 
         self.assertIsInstance(model, self.asymmetric_class)
+        self.assertFalse(model.config.tie_word_embeddings)
         self.assertIs(model.get_input_embeddings(), original_object)
         self.assertTrue(torch.equal(model.get_input_embeddings().weight, original))
         self.assertEqual(tuple(model.get_input_embeddings().weight.shape), (12, 16))
@@ -65,13 +68,31 @@ class AsymmetricModelContract:
 
         with tempfile.TemporaryDirectory() as output_dir:
             model.save_pretrained(output_dir)
+            with open(
+                os.path.join(output_dir, "config.json"), encoding="utf-8"
+            ) as config_file:
+                saved_config = json.load(config_file)
+            self.assertFalse(saved_config["tie_word_embeddings"])
+            self.assertEqual(saved_config["output_token_ids"], keep)
+            self.assertEqual(saved_config["output_vocab_size"], len(keep))
+            self.assertIn(
+                "asymmetric_models.Asymmetric",
+                saved_config["auto_map"]["AutoModelForCausalLM"],
+            )
+            self.assertTrue(os.path.exists(os.path.join(output_dir, "asymmetric_models.py")))
+
             loaded = AutoModelForCausalLM.from_pretrained(
                 output_dir, trust_remote_code=True, local_files_only=True
             ).eval()
             self.assertEqual(type(loaded).__name__, self.asymmetric_class.__name__)
+            self.assertFalse(loaded.config.tie_word_embeddings)
             self.assertTrue(torch.equal(loaded.get_input_embeddings().weight, original))
             self.assertEqual(loaded.output_token_ids.tolist(), keep)
             self.assertEqual(tuple(loaded.get_output_embeddings().weight.shape), (5, 16))
+            self.assertNotEqual(
+                loaded.get_input_embeddings().weight.data_ptr(),
+                loaded.get_output_embeddings().weight.data_ptr(),
+            )
             logits = loaded(input_ids=torch.tensor([[1, 3, 10]])).logits
             self.assertEqual(tuple(logits.shape), (1, 3, 12))
             self.assertTrue(torch.isneginf(logits[..., 1]).all())
