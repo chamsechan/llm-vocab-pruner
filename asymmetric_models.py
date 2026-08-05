@@ -1,21 +1,17 @@
-"""Qwen2 with a full input vocabulary and a compact, output-only LM head."""
+"""Extensible causal-LM adapters with a full input and compact output vocabulary."""
 
 from typing import Iterable, Optional
 
 import torch
 import torch.nn as nn
+from transformers.models.gemma3.modeling_gemma3 import Gemma3ForCausalLM
 from transformers.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 
 
-class AsymmetricQwen2ForCausalLM(Qwen2ForCausalLM):
-    """Keep original token IDs for input while restricting generated tokens.
+class _AsymmetricOutputVocabMixin:
+    """Expand compact LM-head logits back to their original tokenizer IDs."""
 
-    The LM head computes only ``config.output_token_ids``. Its compact logits are
-    scattered back to the original vocabulary positions so standard generation
-    and the original multilingual tokenizer continue to use original token IDs.
-    """
-
-    def __init__(self, config):
+    def _init_asymmetric_output(self, config):
         output_token_ids = getattr(
             config, "output_token_ids", list(range(config.vocab_size))
         )
@@ -24,14 +20,15 @@ class AsymmetricQwen2ForCausalLM(Qwen2ForCausalLM):
         if min(output_token_ids) < 0 or max(output_token_ids) >= config.vocab_size:
             raise ValueError("output_token_ids contains an ID outside vocab_size.")
 
-        config.tie_word_embeddings = False
-        super().__init__(config)
-        self.lm_head = nn.Linear(
-            config.hidden_size,
-            len(output_token_ids),
-            bias=False,
-            device=self.get_input_embeddings().weight.device,
-            dtype=self.get_input_embeddings().weight.dtype,
+        embedding = self.get_input_embeddings()
+        self.set_output_embeddings(
+            nn.Linear(
+                config.hidden_size,
+                len(output_token_ids),
+                bias=False,
+                device=embedding.weight.device,
+                dtype=embedding.weight.dtype,
+            )
         )
         self.register_buffer(
             "output_token_ids",
@@ -52,27 +49,64 @@ class AsymmetricQwen2ForCausalLM(Qwen2ForCausalLM):
         return full_logits
 
     def forward(self, *args, labels: Optional[torch.LongTensor] = None, **kwargs):
-        # Compute loss after expanding logits because the compact head indices are
-        # deliberately not tokenizer IDs.
         outputs = super().forward(*args, labels=None, **kwargs)
         outputs.logits = self._expand_output_logits(outputs.logits)
         if labels is not None:
             outputs.loss = self.loss_function(
-                logits=outputs.logits,
-                labels=labels,
-                vocab_size=self.config.vocab_size,
-                **kwargs,
+                outputs.logits, labels, self.config.vocab_size
             )
         return outputs
 
 
-def convert_qwen2_to_asymmetric_vocab(model, keep_old_ids: Iterable[int]):
-    """Keep input embedding/tokenizer intact and independently prune the LM head."""
+class AsymmetricQwen2ForCausalLM(
+    _AsymmetricOutputVocabMixin, Qwen2ForCausalLM
+):
+    """Qwen2/Qwen2.5 with an independently compacted output LM head."""
 
-    if not isinstance(model, Qwen2ForCausalLM):
+    def __init__(self, config):
+        config.tie_word_embeddings = False
+        super().__init__(config)
+        self._init_asymmetric_output(config)
+
+
+class AsymmetricGemma3ForCausalLM(
+    _AsymmetricOutputVocabMixin, Gemma3ForCausalLM
+):
+    """Text-only Gemma 3 with an independently compacted output LM head."""
+
+    def __init__(self, config):
+        config.tie_word_embeddings = False
+        super().__init__(config)
+        self._init_asymmetric_output(config)
+
+
+_SUPPORTED_MODEL_ADAPTERS = (
+    (Qwen2ForCausalLM, AsymmetricQwen2ForCausalLM),
+    (Gemma3ForCausalLM, AsymmetricGemma3ForCausalLM),
+)
+
+
+def convert_to_asymmetric_output_vocab(model, keep_old_ids: Iterable[int]):
+    """Preserve input embedding/tokenizer and independently prune the LM head."""
+
+    if hasattr(model, "output_token_ids"):
+        raise ValueError("The model already has an asymmetric output vocabulary.")
+
+    asymmetric_class = next(
+        (
+            target_class
+            for source_class, target_class in _SUPPORTED_MODEL_ADAPTERS
+            if isinstance(model, source_class)
+        ),
+        None,
+    )
+    if asymmetric_class is None:
+        supported = ", ".join(
+            source_class.__name__
+            for source_class, _ in _SUPPORTED_MODEL_ADAPTERS
+        )
         raise TypeError(
-            "Asymmetric input/output vocabulary export currently supports Qwen2 "
-            f"models, got {type(model).__name__}."
+            f"Unsupported model class {type(model).__name__}. Supported: {supported}."
         )
 
     keep_old_ids = sorted(set(keep_old_ids))
@@ -101,18 +135,15 @@ def convert_qwen2_to_asymmetric_vocab(model, keep_old_ids: Iterable[int]):
     )
     compact_lm_head.weight = nn.Parameter(compact_weight)
 
-    # The embedding object and its weight are intentionally never replaced.
     model.set_output_embeddings(compact_lm_head)
-    model.__class__ = AsymmetricQwen2ForCausalLM
-    model.register_buffer(
-        "output_token_ids", keep_tensor.clone(), persistent=True
-    )
+    model.__class__ = asymmetric_class
+    model.register_buffer("output_token_ids", keep_tensor.clone(), persistent=True)
 
     model.config.vocab_size = input_vocab_size
     model.config.output_vocab_size = len(keep_old_ids)
     model.config.output_token_ids = keep_old_ids
     model.config.tie_word_embeddings = False
-    model.config.architectures = ["AsymmetricQwen2ForCausalLM"]
+    model.config.architectures = [asymmetric_class.__name__]
 
-    AsymmetricQwen2ForCausalLM.register_for_auto_class("AutoModelForCausalLM")
+    asymmetric_class.register_for_auto_class("AutoModelForCausalLM")
     return model

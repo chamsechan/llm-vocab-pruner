@@ -1,8 +1,8 @@
-# ✂️ LLM Vocabulary & Embedding Pruner
+# ✂️ LLM Asymmetric Output Vocabulary Pruner
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
-[![Transformers](https://img.shields.io/badge/Transformers-4.40+-yellow.svg)](https://huggingface.co/docs/transformers/)
+[![Transformers](https://img.shields.io/badge/Transformers-4.55+-yellow.svg)](https://huggingface.co/docs/transformers/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 一个面向“多语种输入、受限目标语言输出”的非对称词表裁剪工具。
@@ -51,6 +51,22 @@ python3 export_delete_tokens.py
 python3 prune_model_by_txt.py
 ```
 
+Gemma 3 270M 示例：
+
+```bash
+python3 export_delete_tokens.py \
+  --model google/gemma-3-270m-it \
+  --output gemma3-270m-delete-tokens.txt
+
+python3 prune_model_by_txt.py \
+  --model google/gemma-3-270m-it \
+  --delete_txt gemma3-270m-delete-tokens.txt \
+  --output ./gemma3-270m-output-pruned
+```
+
+Gemma 模型需要先在 Hugging Face 接受 Google 的使用许可并完成登录。
+Gemma 3 的共享 tokenizer 含有一个超出纯文本 Embedding 范围的图像占位 Token；脚本会识别并跳过它，不会将其错误地加入文本 LM Head。
+
 ### 4. 原生加载新模型
 ```python
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -70,7 +86,9 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 python3 inference_demo.py --model ./qwen2.5-pruned-by-txt --prompt "Translate into Chinese: Hello world."
 ```
 
-导出模型包含自定义 Qwen2 模型代码，加载时必须保留 `trust_remote_code=True`。当前非对称词表导出支持 Qwen2/Qwen2.5 架构。
+Gemma 3 270M 导出模型同样使用该独立 Demo，只需替换 `--model` 路径。
+
+导出模型包含自定义适配代码，加载时必须保留 `trust_remote_code=True`。当前已通过自动化测试的架构为 Qwen2/Qwen2.5 和纯文本 Gemma 3（包括 Gemma 3 270M）；架构注册表可继续扩展到其他 decoder-only Causal LM。
 
 ---
 
