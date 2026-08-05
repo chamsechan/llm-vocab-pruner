@@ -12,7 +12,7 @@ import argparse
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from asymmetric_qwen2 import convert_qwen2_to_asymmetric_vocab
+from asymmetric_models import convert_to_asymmetric_output_vocab
 
 TEST_PROMPTS = [
     "你好！请用一句话介绍一下中国长城。",
@@ -34,6 +34,27 @@ def load_delete_ids_from_txt(txt_path):
             except ValueError:
                 continue
     return delete_ids
+
+
+def select_output_token_ids(tokenizer, input_vocab_size, delete_ids):
+    """Select output IDs that have real rows in the text model embedding."""
+    tokenizer_vocab_ids = set(tokenizer.get_vocab().values())
+    model_vocab_ids = {
+        token_id
+        for token_id in tokenizer_vocab_ids
+        if 0 <= token_id < input_vocab_size
+    }
+    ignored_ids = tokenizer_vocab_ids - model_vocab_ids
+
+    valid_special_ids = set(tokenizer.all_special_ids).intersection(model_vocab_ids)
+    deleted_special_ids = set(delete_ids).intersection(valid_special_ids)
+    if deleted_special_ids:
+        raise ValueError(
+            "删除清单包含 special token ID，输出端必须保留它们: "
+            f"{sorted(deleted_special_ids)}"
+        )
+
+    return sorted(model_vocab_ids - set(delete_ids)), sorted(ignored_ids)
 
 def generate_text(tok, m, prompt):
     if hasattr(tok, "apply_chat_template") and tok.chat_template:
@@ -85,19 +106,19 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     # 2. 读取 TXT 并切片矩阵
     print(f"\n3. 解析 TXT 文件 '{delete_txt_path}' 并切片矩阵...")
     delete_ids = load_delete_ids_from_txt(delete_txt_path)
-    all_vocab_ids = set(orig_tokenizer.get_vocab().values())
-    deleted_special_ids = delete_ids.intersection(orig_tokenizer.all_special_ids)
-    if deleted_special_ids:
-        raise ValueError(
-            "删除清单包含 special token ID，输出端必须保留它们: "
-            f"{sorted(deleted_special_ids)}"
+    input_vocab_size = model.get_input_embeddings().weight.shape[0]
+    keep_old_ids, ignored_tokenizer_ids = select_output_token_ids(
+        orig_tokenizer, input_vocab_size, delete_ids
+    )
+    if ignored_tokenizer_ids:
+        print(
+            "提示: tokenizer 中以下 ID 没有对应的文本 Embedding 行，"
+            f"不会加入 LM Head: {ignored_tokenizer_ids}"
         )
-    
-    keep_old_ids = sorted(list(all_vocab_ids - delete_ids))
     new_vocab_size = len(keep_old_ids)
     # Preserve the tokenizer IDs and full input embedding. Only the independent
     # output projection is compact; its logits are scattered to original IDs.
-    model = convert_qwen2_to_asymmetric_vocab(model, keep_old_ids)
+    model = convert_to_asymmetric_output_vocab(model, keep_old_ids)
     new_params = sum(p.numel() for p in model.parameters())
     new_embed_params = model.get_input_embeddings().weight.numel()
     new_lm_head_params = model.get_output_embeddings().weight.numel()
