@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-步骤 2：读取 TXT 待删除 Token 清单，执行 Embedding 矩阵切片、导出原生模型，并自动对比显示裁剪前/后的生成质量。
-(Script 2: Read TXT Delete List, Prune Model & Tokenizer, Export, and Compare Before/After Side-by-Side)
+步骤 2：读取输出端待删除 Token 清单，完整保留输入 Embedding，独立裁剪 LM Head，并对比生成结果。
 
 使用方法：
 python3 prune_model_by_txt.py --model Qwen/Qwen2.5-0.5B-Instruct --delete_txt delete_tokens.txt --output ./qwen2.5-pruned-by-txt
@@ -9,11 +8,11 @@ python3 prune_model_by_txt.py --model Qwen/Qwen2.5-0.5B-Instruct --delete_txt de
 
 import os
 import time
-import json
 import argparse
 import torch
-import torch.nn as nn
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
+from asymmetric_qwen2 import convert_qwen2_to_asymmetric_vocab
 
 TEST_PROMPTS = [
     "你好！请用一句话介绍一下中国长城。",
@@ -35,54 +34,6 @@ def load_delete_ids_from_txt(txt_path):
             except ValueError:
                 continue
     return delete_ids
-
-def update_tokenizer_json(output_dir, old_to_new):
-    tokenizer_json_path = os.path.join(output_dir, "tokenizer.json")
-    if not os.path.exists(tokenizer_json_path):
-        print("提示: 未找到 tokenizer.json，跳过 JSON 重排清洗。")
-        return
-
-    print("正在更新 tokenizer.json 并清洗 BPE merges 规则...")
-    with open(tokenizer_json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if "model" in data and "vocab" in data["model"]:
-        old_vocab = data["model"]["vocab"]
-        new_vocab = {}
-        for token_str, old_id in old_vocab.items():
-            if old_id in old_to_new:
-                new_vocab[token_str] = old_to_new[old_id]
-        data["model"]["vocab"] = new_vocab
-
-        if "merges" in data["model"]:
-            old_merges = data["model"]["merges"]
-            new_merges = []
-            for merge_item in old_merges:
-                if isinstance(merge_item, str):
-                    parts = merge_item.split(" ")
-                elif isinstance(merge_item, list):
-                    parts = merge_item
-                else:
-                    parts = []
-
-                if len(parts) == 2:
-                    merged_token = parts[0] + parts[1]
-                    if merged_token in new_vocab or (isinstance(merge_item, str) and merge_item in new_vocab):
-                        new_merges.append(merge_item)
-            data["model"]["merges"] = new_merges
-
-    if "added_tokens" in data:
-        new_added_tokens = []
-        for item in data["added_tokens"]:
-            old_id = item["id"]
-            if old_id in old_to_new:
-                item["id"] = old_to_new[old_id]
-                new_added_tokens.append(item)
-        data["added_tokens"] = new_added_tokens
-
-    with open(tokenizer_json_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    print("✓ tokenizer.json 词表与 merges 清洗完成！")
 
 def generate_text(tok, m, prompt):
     if hasattr(tok, "apply_chat_template") and tok.chat_template:
@@ -124,6 +75,7 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     orig_vocab_size = model.config.vocab_size
     orig_params = sum(p.numel() for p in model.parameters())
     orig_embed_params = model.get_input_embeddings().weight.numel()
+    orig_lm_head_params = model.get_output_embeddings().weight.numel()
 
     print("\n2. 正在录制【原始模型】在测试用例上的回答...")
     orig_results = {}
@@ -134,42 +86,27 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     print(f"\n3. 解析 TXT 文件 '{delete_txt_path}' 并切片矩阵...")
     delete_ids = load_delete_ids_from_txt(delete_txt_path)
     all_vocab_ids = set(orig_tokenizer.get_vocab().values())
+    deleted_special_ids = delete_ids.intersection(orig_tokenizer.all_special_ids)
+    if deleted_special_ids:
+        raise ValueError(
+            "删除清单包含 special token ID，输出端必须保留它们: "
+            f"{sorted(deleted_special_ids)}"
+        )
     
     keep_old_ids = sorted(list(all_vocab_ids - delete_ids))
     new_vocab_size = len(keep_old_ids)
-    old_to_new = {old_id: new_id for new_id, old_id in enumerate(keep_old_ids)}
-
-    input_embeds = model.get_input_embeddings()
-    old_embed_weights = input_embeds.weight.data
-    device = old_embed_weights.device
-
-    keep_tensor = torch.tensor(keep_old_ids, dtype=torch.long, device=device)
-    new_embed_weights = old_embed_weights[keep_tensor]
-    hidden_dim = old_embed_weights.shape[1]
-
-    model.set_input_embeddings(nn.Embedding(new_vocab_size, hidden_dim, _weight=new_embed_weights))
-
-    output_embeds = model.get_output_embeddings()
-    if output_embeds is not None:
-        if getattr(model.config, "tie_word_embeddings", True):
-            model.set_output_embeddings(model.get_input_embeddings())
-        else:
-            old_output_weights = output_embeds.weight.data
-            new_output_weights = old_output_weights[keep_tensor]
-            new_output_layer = nn.Linear(hidden_dim, new_vocab_size, bias=False)
-            new_output_layer.weight = nn.Parameter(new_output_weights)
-            model.set_output_embeddings(new_output_layer)
-
-    model.config.vocab_size = new_vocab_size
+    # Preserve the tokenizer IDs and full input embedding. Only the independent
+    # output projection is compact; its logits are scattered to original IDs.
+    model = convert_qwen2_to_asymmetric_vocab(model, keep_old_ids)
     new_params = sum(p.numel() for p in model.parameters())
     new_embed_params = model.get_input_embeddings().weight.numel()
+    new_lm_head_params = model.get_output_embeddings().weight.numel()
 
     # 3. 导出新模型
     print(f"\n4. 导出裁剪后的原生模型与 Tokenizer 至: {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
     model.save_pretrained(output_dir)
     orig_tokenizer.save_pretrained(output_dir)
-    update_tokenizer_json(output_dir, old_to_new)
 
     # 4. 加载裁剪后新模型并跑测试
     print(f"\n5. 正在加载【裁剪后模型】并录制回答...")
@@ -195,10 +132,13 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     
     v_diff = new_vocab_size - orig_vocab_size
     v_pct = (v_diff / orig_vocab_size) * 100
-    print(f"{'词表大小 (Vocab Size)':<24} | {orig_vocab_size:<20} | {new_vocab_size:<20} | {v_diff} ({v_pct:.2f}%)")
+    print(f"{'输出词表大小':<24} | {orig_vocab_size:<20} | {new_vocab_size:<20} | {v_diff} ({v_pct:.2f}%)")
 
     e_diff = (new_embed_params - orig_embed_params) / 1e6
     print(f"{'Embedding 参数量 (M)':<22} | {orig_embed_params/1e6:<18.2f} M | {new_embed_params/1e6:<18.2f} M | {e_diff:+.2f} M")
+
+    h_diff = (new_lm_head_params - orig_lm_head_params) / 1e6
+    print(f"{'LM Head 参数量 (M)':<22} | {orig_lm_head_params/1e6:<18.2f} M | {new_lm_head_params/1e6:<18.2f} M | {h_diff:+.2f} M")
 
     t_diff = (new_params - orig_params) / 1e6
     t_pct = (t_diff / (orig_params / 1e6)) * 100
@@ -218,7 +158,7 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
         print(f"\n👉 [裁剪后原生模型] (耗时: {pruned_lat:.2f}s | 速度: {pruned_spd:.1f} token/s):")
         print(pruned_text)
 
-    print("\n✓ 验证完成！裁剪后模型回答质量与原始模型完全一致，原生模型已保存！")
+    print("\n✓ 验证完成！输入词表保持完整，输出已限制到保留 Token，模型已保存。")
 
 def main():
     parser = argparse.ArgumentParser(description="步骤 2：读取 TXT 文件，执行模型裁剪与对比验证")
