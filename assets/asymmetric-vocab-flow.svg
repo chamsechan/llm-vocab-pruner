@@ -1,85 +1,108 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc">
-  <title id="title">One-time tokenizer and embedding vocabulary reordering</title>
-  <desc id="desc">Animated export-time permutation moves retained output tokens into a contiguous prefix, followed by mapping-free compact inference.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" role="img" aria-labelledby="title desc">
+  <title id="title">Reordered vocabulary pruning</title>
+  <desc id="desc">A one-time synchronized permutation moves retained tokens and embedding rows into an output prefix. Runtime generation uses compact logits directly without an ID map.</desc>
   <defs>
-    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#071523"/><stop offset="1" stop-color="#102842"/></linearGradient>
-    <linearGradient id="cyan" x2="1"><stop stop-color="#22d3ee"/><stop offset="1" stop-color="#3b82f6"/></linearGradient>
-    <linearGradient id="violet" x2="1"><stop stop-color="#8b5cf6"/><stop offset="1" stop-color="#d946ef"/></linearGradient>
-    <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 9 4.5 0 9Z" fill="#6f8da8"/></marker>
-    <path id="move1" d="M390 160 C470 115 520 115 598 142"/>
-    <path id="move2" d="M390 232 C470 200 520 178 598 178"/>
-    <path id="move3" d="M390 268 C470 255 520 215 598 214"/>
-    <path id="move4" d="M390 196 C470 290 520 290 598 268"/>
-    <path id="move5" d="M390 304 C470 325 520 310 598 304"/>
-    <path id="run1" d="M238 509H298"/><path id="run2" d="M488 509H548"/><path id="run3" d="M718 509H778"/><path id="run4" d="M968 509H1028"/>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#081521"/>
+      <stop offset="1" stop-color="#10263a"/>
+    </linearGradient>
+    <linearGradient id="keep" x2="1">
+      <stop stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="head" x2="1">
+      <stop stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#c026d3"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0 8 4 0 8Z" fill="#7891a8"/>
+    </marker>
+    <path id="move-a" d="M382 154 C445 122 476 122 536 154"/>
+    <path id="move-b" d="M382 232 C446 224 477 177 536 193"/>
+    <path id="move-c" d="M382 271 C446 264 477 216 536 232"/>
+    <path id="move-d" d="M382 193 C446 248 477 278 536 284"/>
+    <path id="runtime" d="M214 406H1028"/>
   </defs>
 
-  <rect width="1200" height="640" rx="24" fill="url(#bg)"/>
-  <rect x="1" y="1" width="1198" height="638" rx="23" fill="none" stroke="#294760"/>
-  <text x="48" y="48" fill="#f8fafc" font-family="Arial,sans-serif" font-size="26" font-weight="700">Reorder Once · Infer Without a Map</text>
-  <text x="48" y="76" fill="#91a9c1" font-family="Arial,sans-serif" font-size="14">Tokenizer IDs and full Embedding rows move together; output tokens become the contiguous prefix [0, K).</text>
+  <rect width="1200" height="500" rx="22" fill="url(#background)"/>
+  <rect x="1" y="1" width="1198" height="498" rx="21" fill="none" stroke="#29455d"/>
 
-  <g font-family="Arial,sans-serif">
-    <text x="48" y="112" fill="#67e8f9" font-size="12" font-weight="700" letter-spacing="1.6">EXPORT TIME · ONE-TIME PERMUTATION P</text>
+  <g font-family="Inter,Arial,sans-serif">
+    <text x="48" y="46" fill="#f8fafc" font-size="25" font-weight="700">Reordered Vocabulary Pruning</text>
+    <text x="48" y="72" fill="#91a7ba" font-size="14">Reorder once during export. Generate directly from a compact output prefix.</text>
 
-    <g>
-      <rect x="48" y="126" width="342" height="210" rx="16" fill="#0c2035" stroke="#365773"/>
-      <text x="72" y="151" fill="#dbeafe" font-size="15" font-weight="700">Before · original IDs / Embedding rows</text>
-      <g font-family="monospace" font-size="12">
-        <rect x="72" y="166" width="284" height="27" rx="6" fill="#123d55"/><text x="86" y="184" fill="#67e8f9">old 2   KEEP · 中文</text>
-        <rect x="72" y="202" width="284" height="27" rx="6" fill="#1d3043"/><text x="86" y="220" fill="#9fb3c8">old 5   INPUT ONLY · français</text>
-        <rect x="72" y="238" width="284" height="27" rx="6" fill="#123d55"/><text x="86" y="256" fill="#67e8f9">old 8   KEEP · punctuation</text>
-        <rect x="72" y="274" width="284" height="27" rx="6" fill="#312657"/><text x="86" y="292" fill="#d8b4fe">old 11  KEEP · EOS</text>
-      </g>
-      <text x="72" y="323" fill="#7892aa" font-size="11">Retained rows are scattered across the old vocabulary.</text>
+    <text x="48" y="108" fill="#8ca5ba" font-size="11" font-weight="700" letter-spacing="1.4">BEFORE</text>
+    <rect x="48" y="120" width="334" height="200" rx="14" fill="#0c1d2c" stroke="#35516a"/>
+    <text x="70" y="145" fill="#dbeafe" font-size="14" font-weight="700">Original IDs + Embedding rows</text>
+
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">
+      <rect x="70" y="158" width="286" height="29" rx="6" fill="#11384e"/>
+      <text x="84" y="177" fill="#67e8f9">old 2</text><text x="151" y="177" fill="#dbeafe">KEEP</text><text x="220" y="177" fill="#8ca5ba">E[2]</text>
+      <rect x="70" y="197" width="286" height="29" rx="6" fill="#1a2b3b"/>
+      <text x="84" y="216" fill="#94a3b8">old 5</text><text x="151" y="216" fill="#94a3b8">INPUT ONLY</text><text x="260" y="216" fill="#73889b">E[5]</text>
+      <rect x="70" y="236" width="286" height="29" rx="6" fill="#11384e"/>
+      <text x="84" y="255" fill="#67e8f9">old 8</text><text x="151" y="255" fill="#dbeafe">KEEP</text><text x="220" y="255" fill="#8ca5ba">E[8]</text>
+      <rect x="70" y="275" width="286" height="29" rx="6" fill="#272149"/>
+      <text x="84" y="294" fill="#d8b4fe">old 11</text><text x="151" y="294" fill="#f5d0fe">KEEP · EOS</text><text x="260" y="294" fill="#a78bfa">E[11]</text>
     </g>
 
     <g text-anchor="middle">
-      <circle cx="494" cy="230" r="42" fill="#102a43" stroke="#4d6d88"/>
-      <text x="494" y="225" fill="#e2e8f0" font-size="13" font-weight="700">same P</text>
-      <text x="494" y="244" fill="#67e8f9" font-family="monospace" font-size="12">IDs + rows</text>
-      <path d="M441 230H547" fill="none" stroke="#6f8da8" stroke-width="2" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+      <path d="M414 212H501" stroke="#7891a8" stroke-width="2" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+      <text x="457" y="187" fill="#e2e8f0" font-size="12" font-weight="700">ONE TIME</text>
+      <text x="457" y="203" fill="#67e8f9" font-size="11">same permutation P</text>
     </g>
 
-    <g>
-      <rect x="598" y="126" width="554" height="210" rx="16" fill="#0c2035" stroke="#22d3ee" stroke-width="1.5"/>
-      <text x="622" y="151" fill="#dbeafe" font-size="15" font-weight="700">After · reordered tokenizer + full Embedding</text>
-      <g font-family="monospace" font-size="12">
-        <rect x="622" y="166" width="302" height="27" rx="6" fill="url(#cyan)"/><text x="636" y="184" fill="#041827">new 0 ← old 2   KEEP · 中文</text>
-        <rect x="622" y="202" width="302" height="27" rx="6" fill="url(#cyan)"/><text x="636" y="220" fill="#041827">new 1 ← old 8   KEEP · punctuation</text>
-        <rect x="622" y="238" width="302" height="27" rx="6" fill="url(#violet)"/><text x="636" y="256" fill="#fff">new 2 ← old 11  KEEP · EOS</text>
-        <path d="M614 271H1132" stroke="#34d399" stroke-width="1.5" stroke-dasharray="5 4"/>
-        <text x="1108" y="266" text-anchor="end" fill="#6ee7b7" font-family="Arial,sans-serif" font-size="11">K = V_output</text>
-        <rect x="622" y="280" width="302" height="27" rx="6" fill="#1d3043"/><text x="636" y="298" fill="#9fb3c8">new 3 ← old 5   INPUT ONLY · français</text>
-      </g>
-      <g transform="translate(952 173)">
-        <rect width="174" height="116" rx="12" fill="#091a2c" stroke="#35536d"/>
-        <text x="87" y="24" text-anchor="middle" fill="#dbeafe" font-size="12" font-weight="700">Aligned invariant</text>
-        <text x="16" y="52" fill="#67e8f9" font-family="monospace" font-size="11">tokenizer(t) = j</text>
-        <text x="16" y="74" fill="#67e8f9" font-family="monospace" font-size="11">embedding[j] =</text>
-        <text x="16" y="93" fill="#67e8f9" font-family="monospace" font-size="11">old_embedding[P[j]]</text>
-      </g>
+    <text x="536" y="108" fill="#67e8f9" font-size="11" font-weight="700" letter-spacing="1.4">AFTER EXPORT</text>
+    <rect x="536" y="120" width="616" height="200" rx="14" fill="#0c1d2c" stroke="#22d3ee"/>
+    <text x="558" y="145" fill="#dbeafe" font-size="14" font-weight="700">Reordered tokenizer and full Embedding stay aligned</text>
+
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">
+      <rect x="558" y="158" width="392" height="29" rx="6" fill="url(#keep)"/>
+      <text x="572" y="177" fill="#041823">new 0 ← old 2</text><text x="710" y="177" fill="#041823">KEEP</text><text x="800" y="177" fill="#041823">E_new[0] = E_old[2]</text>
+      <rect x="558" y="197" width="392" height="29" rx="6" fill="url(#keep)"/>
+      <text x="572" y="216" fill="#041823">new 1 ← old 8</text><text x="710" y="216" fill="#041823">KEEP</text><text x="800" y="216" fill="#041823">E_new[1] = E_old[8]</text>
+      <rect x="558" y="236" width="392" height="29" rx="6" fill="url(#head)"/>
+      <text x="572" y="255" fill="#fff">new 2 ← old 11</text><text x="710" y="255" fill="#fff">KEEP · EOS</text><text x="820" y="255" fill="#fff">E_new[2] = E_old[11]</text>
+      <path d="M552 273H1128" stroke="#34d399" stroke-width="1.4" stroke-dasharray="5 4"/>
+      <text x="1128" y="268" text-anchor="end" fill="#6ee7b7" font-family="Inter,Arial,sans-serif" font-size="10" font-weight="700">OUTPUT PREFIX K</text>
+      <rect x="558" y="282" width="392" height="29" rx="6" fill="#1a2b3b"/>
+      <text x="572" y="301" fill="#94a3b8">new 3 ← old 5</text><text x="710" y="301" fill="#94a3b8">INPUT ONLY</text><text x="820" y="301" fill="#73889b">E_new[3] = E_old[5]</text>
+    </g>
+
+    <g transform="translate(978 164)">
+      <rect width="150" height="88" rx="10" fill="#091723" stroke="#324b60"/>
+      <text x="75" y="25" text-anchor="middle" fill="#dbeafe" font-size="11" font-weight="700">Invariant</text>
+      <text x="14" y="50" fill="#67e8f9" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10">token(t) → new j</text>
+      <text x="14" y="69" fill="#67e8f9" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10">lookup(j) → same E</text>
     </g>
 
     <g fill="#67e8f9" filter="url(#glow)">
-      <circle r="4"><animateMotion dur="2.8s" repeatCount="indefinite"><mpath href="#move1"/></animateMotion></circle>
-      <circle r="4"><animateMotion dur="2.8s" begin=".35s" repeatCount="indefinite"><mpath href="#move2"/></animateMotion></circle>
-      <circle r="4" fill="#d8b4fe"><animateMotion dur="2.8s" begin=".7s" repeatCount="indefinite"><mpath href="#move3"/></animateMotion></circle>
-      <circle r="4" fill="#94a3b8"><animateMotion dur="2.8s" begin="1.05s" repeatCount="indefinite"><mpath href="#move4"/></animateMotion></circle>
+      <circle r="4"><animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#move-a"/></animateMotion></circle>
+      <circle r="4"><animateMotion dur="2.6s" begin=".4s" repeatCount="indefinite"><mpath href="#move-b"/></animateMotion></circle>
+      <circle r="4" fill="#d8b4fe"><animateMotion dur="2.6s" begin=".8s" repeatCount="indefinite"><mpath href="#move-c"/></animateMotion></circle>
+      <circle r="4" fill="#94a3b8"><animateMotion dur="2.6s" begin="1.2s" repeatCount="indefinite"><mpath href="#move-d"/></animateMotion></circle>
     </g>
 
-    <text x="48" y="382" fill="#a78bfa" font-size="12" font-weight="700" letter-spacing="1.6">RUNTIME · DIRECT COMPACT ID SPACE</text>
+    <text x="48" y="348" fill="#a78bfa" font-size="11" font-weight="700" letter-spacing="1.4">RUNTIME · NO ID MAP</text>
+    <rect x="48" y="362" width="1104" height="98" rx="14" fill="#0a1a28" stroke="#2d465b"/>
 
     <g text-anchor="middle">
-      <g><rect x="48" y="430" width="190" height="158" rx="15" fill="#0c2035" stroke="#375a78"/><text x="143" y="460" fill="#dbeafe" font-size="14" font-weight="700">Reordered Tokenizer</text><text x="143" y="488" fill="#7dd3fc" font-size="12">multilingual input IDs</text><text x="143" y="537" fill="#91a9c1" font-size="11">output: 0 ... K−1</text><text x="143" y="558" fill="#91a9c1" font-size="11">input-only: K ... V−1</text></g>
-      <g><rect x="298" y="430" width="190" height="158" rx="15" fill="#0c2035" stroke="#22d3ee"/><text x="393" y="460" fill="#dbeafe" font-size="14" font-weight="700">Full Embedding</text><text x="393" y="488" fill="#67e8f9" font-family="monospace" font-size="12">[V_input, H]</text><g fill="#173b55"><rect x="340" y="516" width="106" height="9" rx="4"/><rect x="340" y="533" width="106" height="9" rx="4"/><rect x="340" y="550" width="106" height="9" rx="4"/></g><rect x="340" y="516" width="106" height="9" rx="4" fill="url(#cyan)"><animate attributeName="y" values="516;550;533;516" dur="3s" repeatCount="indefinite"/></rect><text x="393" y="576" fill="#34d399" font-size="11" font-weight="700">ALL ROWS RETAINED</text></g>
-      <g><rect x="548" y="430" width="170" height="158" rx="15" fill="#0c2035" stroke="#526e8b"/><text x="633" y="460" fill="#dbeafe" font-size="14" font-weight="700">Transformer</text><text x="633" y="488" fill="#91a9c1" font-size="12">Attention + MLP</text><circle cx="602" cy="535" r="15" fill="none" stroke="#8b5cf6" stroke-width="3"/><circle cx="665" cy="535" r="15" fill="none" stroke="#d946ef" stroke-width="3"/><path d="M617 535H650" stroke="#a78bfa" stroke-width="2"/><circle cx="602" cy="535" r="5" fill="#d946ef"><animate attributeName="opacity" values=".25;1;.25" dur="1.3s" repeatCount="indefinite"/></circle></g>
-      <g><rect x="778" y="430" width="190" height="158" rx="15" fill="#0c2035" stroke="#a855f7"/><text x="873" y="460" fill="#dbeafe" font-size="14" font-weight="700">Compact LM Head</text><text x="873" y="488" fill="#d8b4fe" font-family="monospace" font-size="12">[K, H]</text><g fill="url(#violet)"><rect x="821" y="516" width="104" height="10" rx="4"/><rect x="821" y="534" width="104" height="10" rx="4"/><rect x="821" y="552" width="104" height="10" rx="4"/></g><text x="873" y="576" fill="#f0abfc" font-size="11" font-weight="700">UNTIED · PRUNED</text></g>
-      <g><rect x="1028" y="430" width="124" height="158" rx="15" fill="#0c2035" stroke="#34d399"/><text x="1090" y="460" fill="#dbeafe" font-size="14" font-weight="700">Direct IDs</text><text x="1090" y="489" fill="#6ee7b7" font-size="12">logits [..., K]</text><text x="1090" y="526" fill="#86efac" font-size="12">generate</text><text x="1090" y="549" fill="#86efac" font-size="12">decode</text><text x="1090" y="576" fill="#34d399" font-size="10" font-weight="700">NO SCATTER / MAP</text></g>
+      <g><rect x="70" y="384" width="144" height="44" rx="9" fill="#10283a" stroke="#3c5c74"/><text x="142" y="402" fill="#dbeafe" font-size="11" font-weight="700">New token IDs</text><text x="142" y="418" fill="#8ca5ba" font-size="10">0..V_input−1</text></g>
+      <g><rect x="280" y="384" width="174" height="44" rx="9" fill="#10283a" stroke="#22d3ee"/><text x="367" y="402" fill="#dbeafe" font-size="11" font-weight="700">Full Embedding</text><text x="367" y="418" fill="#67e8f9" font-size="10">[V_input, H]</text></g>
+      <g><rect x="520" y="384" width="142" height="44" rx="9" fill="#10283a" stroke="#526e8b"/><text x="591" y="411" fill="#dbeafe" font-size="11" font-weight="700">Transformer</text></g>
+      <g><rect x="728" y="384" width="174" height="44" rx="9" fill="#10283a" stroke="#a855f7"/><text x="815" y="402" fill="#dbeafe" font-size="11" font-weight="700">Compact LM Head</text><text x="815" y="418" fill="#d8b4fe" font-size="10">logits [..., K]</text></g>
+      <g><rect x="968" y="384" width="160" height="44" rx="9" fill="#10283a" stroke="#34d399"/><text x="1048" y="402" fill="#dbeafe" font-size="11" font-weight="700">Direct decode</text><text x="1048" y="418" fill="#6ee7b7" font-size="10">no scatter · no map</text></g>
     </g>
 
-    <g fill="none" stroke="#6f8da8" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#arrow)"><use href="#run1"/><use href="#run2"/><use href="#run3"/><use href="#run4"/></g>
-    <g fill="#67e8f9" filter="url(#glow)"><circle r="4"><animateMotion dur="1.8s" repeatCount="indefinite"><mpath href="#run1"/></animateMotion></circle><circle r="4"><animateMotion dur="1.8s" begin=".35s" repeatCount="indefinite"><mpath href="#run2"/></animateMotion></circle><circle r="4" fill="#d8b4fe"><animateMotion dur="1.8s" begin=".7s" repeatCount="indefinite"><mpath href="#run3"/></animateMotion></circle><circle r="4" fill="#6ee7b7"><animateMotion dur="1.8s" begin="1.05s" repeatCount="indefinite"><mpath href="#run4"/></animateMotion></circle></g>
+    <g fill="none" stroke="#7891a8" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M214 406H280"/><path d="M454 406H520"/><path d="M662 406H728"/><path d="M902 406H968"/>
+    </g>
+    <circle r="4" fill="#67e8f9" filter="url(#glow)"><animateMotion dur="3s" repeatCount="indefinite"><mpath href="#runtime"/></animateMotion></circle>
+
+    <text x="600" y="482" text-anchor="middle" fill="#8299ad" font-size="11">All input vectors remain available. Only IDs in the prefix [0, K) can be generated.</text>
   </g>
 </svg>
