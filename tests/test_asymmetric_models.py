@@ -5,18 +5,21 @@ import unittest
 
 import torch
 from accelerate import init_empty_weights
+from tokenizers import Tokenizer, models, pre_tokenizers
 from transformers import (
     AutoModelForCausalLM,
-    Gemma3ForCausalLM,
+    AutoTokenizer,
     Gemma3TextConfig,
+    PreTrainedTokenizerFast,
     Qwen2Config,
     Qwen2ForCausalLM,
+    Gemma3ForCausalLM,
 )
 
 from asymmetric_models import (
     AsymmetricGemma3ForCausalLM,
     AsymmetricQwen2ForCausalLM,
-    convert_to_asymmetric_output_vocab,
+    convert_to_reordered_output_vocab,
 )
 
 
@@ -26,76 +29,135 @@ class AsymmetricModelContract:
     def make_model(self):
         raise NotImplementedError
 
-    def test_conversion_generation_and_output_mask(self):
+    def make_tokenizer(self):
+        vocab = {f"t{token_id}": token_id for token_id in range(12)}
+        backend = Tokenizer(models.WordLevel(vocab, unk_token="t1"))
+        backend.pre_tokenizer = pre_tokenizers.Whitespace()
+        return PreTrainedTokenizerFast(
+            tokenizer_object=backend,
+            unk_token="t1",
+            pad_token="t0",
+            bos_token="t2",
+            eos_token="t11",
+        )
+
+    def test_conversion_reorders_embedding_and_emits_compact_logits(self):
         model = self.make_model()
+        tokenizer = self.make_tokenizer()
         keep = [0, 2, 5, 7, 11]
+        permutation = keep + [1, 3, 4, 6, 8, 9, 10]
+        old_to_new = {old_id: new_id for new_id, old_id in enumerate(permutation)}
         original_object = model.get_input_embeddings()
         original = original_object.weight.detach().clone()
-        convert_to_asymmetric_output_vocab(model, keep)
+        old_input_ids = torch.tensor([[1, 3, 10]])
+        with torch.no_grad():
+            reference_logits = model(input_ids=old_input_ids).logits[..., keep]
+
+        model, tokenizer = convert_to_reordered_output_vocab(model, tokenizer, keep)
 
         self.assertIsInstance(model, self.asymmetric_class)
         self.assertFalse(model.config.tie_word_embeddings)
+        self.assertTrue(model.config.vocab_reordered)
+        self.assertFalse(hasattr(model.config, "output_token_ids"))
+        self.assertFalse(hasattr(model, "output_token_ids"))
         self.assertIs(model.get_input_embeddings(), original_object)
-        self.assertTrue(torch.equal(model.get_input_embeddings().weight, original))
+        self.assertTrue(
+            torch.equal(model.get_input_embeddings().weight, original[permutation])
+        )
         self.assertEqual(tuple(model.get_input_embeddings().weight.shape), (12, 16))
         self.assertEqual(tuple(model.get_output_embeddings().weight.shape), (5, 16))
-        self.assertTrue(torch.equal(model.get_output_embeddings().weight, original[keep]))
+        self.assertTrue(
+            torch.equal(model.get_output_embeddings().weight, original[keep])
+        )
         self.assertNotEqual(
             model.get_input_embeddings().weight.data_ptr(),
             model.get_output_embeddings().weight.data_ptr(),
         )
 
-        input_ids = torch.tensor([[1, 3, 10]])
-        logits = model(input_ids=input_ids).logits
-        self.assertEqual(tuple(logits.shape), (1, 3, 12))
-        self.assertTrue(torch.isneginf(logits[..., [1, 3, 4, 6, 8, 9, 10]]).all())
-        self.assertTrue(torch.isfinite(logits[..., keep]).all())
+        for old_id in range(12):
+            self.assertEqual(
+                tokenizer.convert_tokens_to_ids(f"t{old_id}"), old_to_new[old_id]
+            )
+        self.assertEqual(tokenizer.eos_token_id, old_to_new[11])
+        self.assertEqual(model.config.eos_token_id, old_to_new[11])
+
+        new_input_ids = torch.tensor(
+            [[old_to_new[token_id] for token_id in old_input_ids[0].tolist()]]
+        )
+        logits = model(input_ids=new_input_ids).logits
+        self.assertEqual(tuple(logits.shape), (1, 3, 5))
+        self.assertTrue(torch.allclose(logits, reference_logits, atol=1e-6, rtol=0))
 
         generated = model.generate(
-            input_ids=input_ids,
-            attention_mask=torch.ones_like(input_ids),
+            input_ids=new_input_ids,
+            attention_mask=torch.ones_like(new_input_ids),
             pad_token_id=0,
             max_new_tokens=2,
             do_sample=False,
+            repetition_penalty=1.1,
+            no_repeat_ngram_size=2,
+            bad_words_ids=[[5, 1]],
         )
-        self.assertTrue(set(generated[0, 3:].tolist()).issubset(set(keep)))
+        self.assertTrue((generated[0, 3:] < len(keep)).all())
+
+        with self.assertRaisesRegex(ValueError, "input-only token IDs"):
+            model(input_ids=new_input_ids, labels=torch.tensor([[0, 6, 1]]))
+
+    def test_conversion_rejects_missing_required_generation_token(self):
+        with self.assertRaisesRegex(ValueError, "BOS/EOS/PAD/forced"):
+            convert_to_reordered_output_vocab(
+                self.make_model(), self.make_tokenizer(), [0, 2, 5, 7]
+            )
 
     def test_save_and_auto_reload_round_trip(self):
         model = self.make_model()
+        tokenizer = self.make_tokenizer()
         keep = [0, 2, 5, 7, 11]
+        permutation = keep + [1, 3, 4, 6, 8, 9, 10]
         original = model.get_input_embeddings().weight.detach().clone()
-        convert_to_asymmetric_output_vocab(model, keep)
+        model, tokenizer = convert_to_reordered_output_vocab(model, tokenizer, keep)
 
         with tempfile.TemporaryDirectory() as output_dir:
             model.save_pretrained(output_dir)
+            tokenizer.save_pretrained(output_dir)
             with open(
                 os.path.join(output_dir, "config.json"), encoding="utf-8"
             ) as config_file:
                 saved_config = json.load(config_file)
             self.assertFalse(saved_config["tie_word_embeddings"])
-            self.assertEqual(saved_config["output_token_ids"], keep)
+            self.assertTrue(saved_config["vocab_reordered"])
+            self.assertNotIn("output_token_ids", saved_config)
             self.assertEqual(saved_config["output_vocab_size"], len(keep))
             self.assertIn(
                 "asymmetric_models.Asymmetric",
                 saved_config["auto_map"]["AutoModelForCausalLM"],
             )
-            self.assertTrue(os.path.exists(os.path.join(output_dir, "asymmetric_models.py")))
+            self.assertTrue(
+                os.path.exists(os.path.join(output_dir, "asymmetric_models.py"))
+            )
 
+            loaded_tokenizer = AutoTokenizer.from_pretrained(
+                output_dir, local_files_only=True
+            )
             loaded = AutoModelForCausalLM.from_pretrained(
                 output_dir, trust_remote_code=True, local_files_only=True
             ).eval()
             self.assertEqual(type(loaded).__name__, self.asymmetric_class.__name__)
             self.assertFalse(loaded.config.tie_word_embeddings)
-            self.assertTrue(torch.equal(loaded.get_input_embeddings().weight, original))
-            self.assertEqual(loaded.output_token_ids.tolist(), keep)
-            self.assertEqual(tuple(loaded.get_output_embeddings().weight.shape), (5, 16))
+            self.assertTrue(loaded.config.vocab_reordered)
+            self.assertTrue(
+                torch.equal(loaded.get_input_embeddings().weight, original[permutation])
+            )
+            self.assertEqual(
+                tuple(loaded.get_output_embeddings().weight.shape), (5, 16)
+            )
+            self.assertEqual(loaded_tokenizer.convert_tokens_to_ids("t11"), 4)
             self.assertNotEqual(
                 loaded.get_input_embeddings().weight.data_ptr(),
                 loaded.get_output_embeddings().weight.data_ptr(),
             )
-            logits = loaded(input_ids=torch.tensor([[1, 3, 10]])).logits
-            self.assertEqual(tuple(logits.shape), (1, 3, 12))
-            self.assertTrue(torch.isneginf(logits[..., 1]).all())
+            logits = loaded(input_ids=torch.tensor([[5, 6, 11]])).logits
+            self.assertEqual(tuple(logits.shape), (1, 3, 5))
 
 
 class AsymmetricQwen2Test(AsymmetricModelContract, unittest.TestCase):
@@ -111,8 +173,9 @@ class AsymmetricQwen2Test(AsymmetricModelContract, unittest.TestCase):
             num_key_value_heads=1,
             max_position_embeddings=32,
             tie_word_embeddings=True,
-            bos_token_id=0,
+            bos_token_id=2,
             eos_token_id=11,
+            pad_token_id=0,
         )
         return make_deterministic_model(Qwen2ForCausalLM(config))
 
@@ -133,7 +196,7 @@ class AsymmetricGemma3Test(AsymmetricModelContract, unittest.TestCase):
             sliding_window=16,
             layer_types=["full_attention"],
             tie_word_embeddings=True,
-            bos_token_id=0,
+            bos_token_id=2,
             eos_token_id=11,
             pad_token_id=0,
         )
@@ -156,15 +219,13 @@ class AsymmetricGemma3Test(AsymmetricModelContract, unittest.TestCase):
             sliding_window=512,
             layer_types=layer_types,
             query_pre_attn_scalar=256,
-            tie_word_embeddings=True,
+            tie_word_embeddings=False,
         )
+        config.output_vocab_size = 5
+        config.vocab_reordered = True
         with init_empty_weights():
-            model = Gemma3ForCausalLM(config)
-            original_embedding = model.get_input_embeddings()
-            convert_to_asymmetric_output_vocab(model, [0, 1, 2, 100, 200])
+            model = AsymmetricGemma3ForCausalLM(config)
 
-        self.assertIsInstance(model, AsymmetricGemma3ForCausalLM)
-        self.assertIs(model.get_input_embeddings(), original_embedding)
         self.assertEqual(
             tuple(model.get_input_embeddings().weight.shape), (262144, 640)
         )

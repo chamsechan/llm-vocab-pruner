@@ -34,6 +34,7 @@ class FakeExportedModel:
     def __init__(self, tied=False, share_parameter=False):
         self.config = Qwen2Config(vocab_size=12, tie_word_embeddings=tied)
         self.config.output_vocab_size = 5
+        self.config.vocab_reordered = True
         self.input_embeddings = nn.Embedding(12, 4)
         self.output_embeddings = nn.Linear(4, 5, bias=False)
         if share_parameter:
