@@ -225,16 +225,16 @@ def _remap_config_token_ids(config, old_to_new):
         _remap_config_token_ids(text_config, old_to_new)
 
 
-def _remap_post_processor_ids(node, old_to_new, parent_key=None):
+def _remap_post_processor_ids(node, old_to_new):
     if isinstance(node, dict):
         for key, value in node.items():
             if key == "ids" and isinstance(value, list):
                 node[key] = [_remap_token_value(item, old_to_new) for item in value]
             else:
-                _remap_post_processor_ids(value, old_to_new, key)
+                _remap_post_processor_ids(value, old_to_new)
     elif isinstance(node, list):
         for value in node:
-            _remap_post_processor_ids(value, old_to_new, parent_key)
+            _remap_post_processor_ids(value, old_to_new)
 
 
 def reorder_tokenizer(tokenizer, new_to_old: Iterable[int]):
@@ -284,9 +284,7 @@ def reorder_tokenizer(tokenizer, new_to_old: Iterable[int]):
         if isinstance(old_id, int):
             added_token["id"] = old_to_new.get(old_id, old_id)
 
-    _remap_post_processor_ids(
-        backend_data.get("post_processor"), old_to_new, "post_processor"
-    )
+    _remap_post_processor_ids(backend_data.get("post_processor"), old_to_new)
 
     reordered = copy.deepcopy(tokenizer)
     reordered._tokenizer = Tokenizer.from_str(
@@ -448,14 +446,5 @@ def convert_to_reordered_output_vocab(model, tokenizer, keep_old_ids: Iterable[i
     model.config.tie_word_embeddings = False
     model.config.architectures = [asymmetric_class.__name__]
 
-    if hasattr(model.config, "output_token_ids"):
-        delattr(model.config, "output_token_ids")
-
     asymmetric_class.register_for_auto_class("AutoModelForCausalLM")
     return model, reordered_tokenizer
-
-
-def convert_to_asymmetric_output_vocab(model, tokenizer, keep_old_ids):
-    """Compatibility alias for the reordered-vocabulary conversion API."""
-
-    return convert_to_reordered_output_vocab(model, tokenizer, keep_old_ids)
