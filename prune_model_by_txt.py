@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-步骤 2：读取输出端待删除 Token 清单，完整保留输入 Embedding，独立裁剪 LM Head，并对比生成结果。
+步骤 2：读取输出端待删除 Token 清单，重排 tokenizer/Embedding，并将 LM Head 裁剪为连续输出前缀。
 
 使用方法：
 python3 prune_model_by_txt.py --model Qwen/Qwen2.5-0.5B-Instruct --delete_txt delete_tokens.txt --output ./qwen2.5-pruned-by-txt
@@ -12,13 +12,14 @@ import argparse
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from asymmetric_models import convert_to_asymmetric_output_vocab
+from asymmetric_models import convert_to_reordered_output_vocab
 
 TEST_PROMPTS = [
     "你好！请用一句话介绍一下中国长城。",
     "请写一段 Python 代码，用快速排序算法对整数列表进行排序。",
-    "What are the primary benefits of artificial intelligence in healthcare?"
+    "What are the primary benefits of artificial intelligence in healthcare?",
 ]
+
 
 def load_delete_ids_from_txt(txt_path):
     delete_ids = set()
@@ -40,9 +41,7 @@ def select_output_token_ids(tokenizer, input_vocab_size, delete_ids):
     """Select output IDs that have real rows in the text model embedding."""
     tokenizer_vocab_ids = set(tokenizer.get_vocab().values())
     model_vocab_ids = {
-        token_id
-        for token_id in tokenizer_vocab_ids
-        if 0 <= token_id < input_vocab_size
+        token_id for token_id in tokenizer_vocab_ids if 0 <= token_id < input_vocab_size
     }
     ignored_ids = tokenizer_vocab_ids - model_vocab_ids
 
@@ -58,9 +57,13 @@ def select_output_token_ids(tokenizer, input_vocab_size, delete_ids):
 
 
 def validate_exported_model(model):
-    """Fail fast if the reloaded model is not truly asymmetric and untied."""
+    """Fail fast unless the export uses a compact, mapping-free output prefix."""
     if model.config.tie_word_embeddings is not False:
         raise RuntimeError("导出模型的 tie_word_embeddings 必须为 false。")
+    if getattr(model.config, "vocab_reordered", False) is not True:
+        raise RuntimeError("导出模型必须标记 vocab_reordered=true。")
+    if hasattr(model.config, "output_token_ids") or hasattr(model, "output_token_ids"):
+        raise RuntimeError("重排模型不应再包含运行时 output_token_ids 映射。")
 
     input_weight = model.get_input_embeddings().weight
     output_weight = model.get_output_embeddings().weight
@@ -75,15 +78,18 @@ def validate_exported_model(model):
         )
 
     print(
-        "✓ 结构校验通过: tie_word_embeddings=false, "
+        "✓ 结构校验通过: vocab_reordered=true, tie_word_embeddings=false, "
         f"Embedding={tuple(input_weight.shape)}, "
         f"LM Head={tuple(output_weight.shape)}, 权重未共享。"
     )
 
+
 def generate_text(tok, m, prompt):
     if hasattr(tok, "apply_chat_template") and tok.chat_template:
         messages = [{"role": "user", "content": prompt}]
-        formatted_text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        formatted_text = tok.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
         inputs = tok(formatted_text, return_tensors="pt").to(m.device)
     else:
         inputs = tok(prompt, return_tensors="pt").to(m.device)
@@ -100,6 +106,7 @@ def generate_text(tok, m, prompt):
     response = tok.decode(generated_ids, skip_special_tokens=True)
     return latency, speed, response.strip()
 
+
 def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     print(f"\n=======================================================")
     print(f" 步骤 2：读取 TXT 文件，执行模型裁剪与对比验证")
@@ -110,11 +117,13 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
 
     # 1. 加载原始模型并先执行原始效果基准测试
     print("1. 正在加载原始 Tokenizer 与 Model...")
-    orig_tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
+    orig_tokenizer = AutoTokenizer.from_pretrained(
+        model_name_or_path, trust_remote_code=True
+    )
     model = AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
         torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        trust_remote_code=True
+        trust_remote_code=True,
     )
 
     orig_vocab_size = model.config.vocab_size
@@ -140,9 +149,12 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
             f"不会加入 LM Head: {ignored_tokenizer_ids}"
         )
     new_vocab_size = len(keep_old_ids)
-    # Preserve the tokenizer IDs and full input embedding. Only the independent
-    # output projection is compact; its logits are scattered to original IDs.
-    model = convert_to_asymmetric_output_vocab(model, keep_old_ids)
+    # Put every retained output token in the contiguous ID prefix. The full
+    # embedding is reordered by exactly the same permutation, so every token
+    # keeps its original vector and compact logits need no runtime ID mapping.
+    model, reordered_tokenizer = convert_to_reordered_output_vocab(
+        model, orig_tokenizer, keep_old_ids
+    )
     new_params = sum(p.numel() for p in model.parameters())
     new_embed_params = model.get_input_embeddings().weight.numel()
     new_lm_head_params = model.get_output_embeddings().weight.numel()
@@ -151,16 +163,18 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     print(f"\n4. 导出裁剪后的原生模型与 Tokenizer 至: {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
     model.save_pretrained(output_dir)
-    orig_tokenizer.save_pretrained(output_dir)
+    reordered_tokenizer.save_pretrained(output_dir)
 
     # 4. 加载裁剪后新模型并跑测试
     print(f"\n5. 正在加载【裁剪后模型】并录制回答...")
-    pruned_tokenizer = AutoTokenizer.from_pretrained(output_dir, trust_remote_code=True)
+    pruned_tokenizer = AutoTokenizer.from_pretrained(
+        output_dir, trust_remote_code=True, fix_mistral_regex=False
+    )
     pruned_model = AutoModelForCausalLM.from_pretrained(
         output_dir,
         torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
         device_map="auto" if torch.cuda.is_available() else None,
-        trust_remote_code=True
+        trust_remote_code=True,
     )
     validate_exported_model(pruned_model)
 
@@ -173,22 +187,32 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     print(f" 📊 裁剪前 vs 裁剪后 对比结果汇总")
     print(f"=======================================================\n")
 
-    print(f"{'指标 (Metric)':<24} | {'原始模型 (Original)':<20} | {'裁剪后模型 (Pruned)':<20} | {'变化趋势 (Diff)':<15}")
+    print(
+        f"{'指标 (Metric)':<24} | {'原始模型 (Original)':<20} | {'裁剪后模型 (Pruned)':<20} | {'变化趋势 (Diff)':<15}"
+    )
     print("-" * 88)
-    
+
     v_diff = new_vocab_size - orig_vocab_size
     v_pct = (v_diff / orig_vocab_size) * 100
-    print(f"{'输出词表大小':<24} | {orig_vocab_size:<20} | {new_vocab_size:<20} | {v_diff} ({v_pct:.2f}%)")
+    print(
+        f"{'输出词表大小':<24} | {orig_vocab_size:<20} | {new_vocab_size:<20} | {v_diff} ({v_pct:.2f}%)"
+    )
 
     e_diff = (new_embed_params - orig_embed_params) / 1e6
-    print(f"{'Embedding 参数量 (M)':<22} | {orig_embed_params/1e6:<18.2f} M | {new_embed_params/1e6:<18.2f} M | {e_diff:+.2f} M")
+    print(
+        f"{'Embedding 参数量 (M)':<22} | {orig_embed_params/1e6:<18.2f} M | {new_embed_params/1e6:<18.2f} M | {e_diff:+.2f} M"
+    )
 
     h_diff = (new_lm_head_params - orig_lm_head_params) / 1e6
-    print(f"{'LM Head 参数量 (M)':<22} | {orig_lm_head_params/1e6:<18.2f} M | {new_lm_head_params/1e6:<18.2f} M | {h_diff:+.2f} M")
+    print(
+        f"{'LM Head 参数量 (M)':<22} | {orig_lm_head_params/1e6:<18.2f} M | {new_lm_head_params/1e6:<18.2f} M | {h_diff:+.2f} M"
+    )
 
     t_diff = (new_params - orig_params) / 1e6
     t_pct = (t_diff / (orig_params / 1e6)) * 100
-    print(f"{'模型总参数量 (M)':<23} | {orig_params/1e6:<18.2f} M | {new_params/1e6:<18.2f} M | {t_diff:+.2f} M ({t_pct:.2f}%)")
+    print(
+        f"{'模型总参数量 (M)':<23} | {orig_params/1e6:<18.2f} M | {new_params/1e6:<18.2f} M | {t_diff:+.2f} M ({t_pct:.2f}%)"
+    )
 
     print(f"\n💬 对话生成质量与文本逐字对比:")
     for idx, prompt in enumerate(TEST_PROMPTS, 1):
@@ -199,21 +223,43 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
         orig_lat, orig_spd, orig_text = orig_results[prompt]
         pruned_lat, pruned_spd, pruned_text = pruned_results[prompt]
 
-        print(f"👉 [原始未裁剪模型] (耗时: {orig_lat:.2f}s | 速度: {orig_spd:.1f} token/s):")
+        print(
+            f"👉 [原始未裁剪模型] (耗时: {orig_lat:.2f}s | 速度: {orig_spd:.1f} token/s):"
+        )
         print(orig_text)
-        print(f"\n👉 [裁剪后原生模型] (耗时: {pruned_lat:.2f}s | 速度: {pruned_spd:.1f} token/s):")
+        print(
+            f"\n👉 [裁剪后原生模型] (耗时: {pruned_lat:.2f}s | 速度: {pruned_spd:.1f} token/s):"
+        )
         print(pruned_text)
 
-    print("\n✓ 验证完成！输入词表保持完整，输出已限制到保留 Token，模型已保存。")
+    print(
+        "\n✓ 验证完成！输入词表保持完整且已同步重排，输出为连续紧凑前缀，模型已保存。"
+    )
+
 
 def main():
-    parser = argparse.ArgumentParser(description="步骤 2：读取 TXT 文件，执行模型裁剪与对比验证")
-    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="模型名称或本地路径")
-    parser.add_argument("--delete_txt", type=str, default="delete_tokens.txt", help="要读取的删除列表 TXT 文件")
-    parser.add_argument("--output", type=str, default="./qwen2.5-pruned-by-txt", help="导出的新模型目录")
+    parser = argparse.ArgumentParser(
+        description="步骤 2：读取 TXT 文件，执行模型裁剪与对比验证"
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="Qwen/Qwen2.5-0.5B-Instruct",
+        help="模型名称或本地路径",
+    )
+    parser.add_argument(
+        "--delete_txt",
+        type=str,
+        default="delete_tokens.txt",
+        help="要读取的删除列表 TXT 文件",
+    )
+    parser.add_argument(
+        "--output", type=str, default="./qwen2.5-pruned-by-txt", help="导出的新模型目录"
+    )
     args = parser.parse_args()
 
     prune_model_by_txt(args.model, args.delete_txt, args.output)
+
 
 if __name__ == "__main__":
     main()
