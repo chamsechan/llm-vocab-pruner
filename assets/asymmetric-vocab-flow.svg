@@ -1,108 +1,187 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" role="img" aria-labelledby="title desc">
-  <title id="title">Reordered vocabulary pruning</title>
-  <desc id="desc">A one-time synchronized permutation moves retained tokens and embedding rows into an output prefix. Runtime generation uses compact logits directly without an ID map.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="590" viewBox="0 0 1200 590" role="img" aria-labelledby="title desc">
+  <title id="title">Stable vocabulary partition for compact LM Head pruning</title>
+  <desc id="desc">Output tokens are blue and input-only tokens are amber. Animated token rows move from an interleaved original order into a stable output prefix followed by an input-only tail.</desc>
   <defs>
     <linearGradient id="background" x2="1" y2="1">
-      <stop stop-color="#081521"/>
+      <stop stop-color="#07131f"/>
       <stop offset="1" stop-color="#10263a"/>
     </linearGradient>
-    <linearGradient id="keep" x2="1">
-      <stop stop-color="#22d3ee"/>
-      <stop offset="1" stop-color="#3b82f6"/>
+    <linearGradient id="outputRow" x2="1">
+      <stop stop-color="#075985"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="inputRow" x2="1">
+      <stop stop-color="#78350f"/>
+      <stop offset="1" stop-color="#b45309"/>
     </linearGradient>
     <linearGradient id="head" x2="1">
-      <stop stop-color="#8b5cf6"/>
-      <stop offset="1" stop-color="#c026d3"/>
+      <stop stop-color="#7c3aed"/>
+      <stop offset="1" stop-color="#a21caf"/>
     </linearGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="2.5" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
       <path d="M0 0 8 4 0 8Z" fill="#7891a8"/>
     </marker>
-    <path id="move-a" d="M382 154 C445 122 476 122 536 154"/>
-    <path id="move-b" d="M382 232 C446 224 477 177 536 193"/>
-    <path id="move-c" d="M382 271 C446 264 477 216 536 232"/>
-    <path id="move-d" d="M382 193 C446 248 477 278 536 284"/>
-    <path id="runtime" d="M214 406H1028"/>
   </defs>
 
-  <rect width="1200" height="500" rx="22" fill="url(#background)"/>
-  <rect x="1" y="1" width="1198" height="498" rx="21" fill="none" stroke="#29455d"/>
+  <rect width="1200" height="590" rx="22" fill="url(#background)"/>
+  <rect x="1" y="1" width="1198" height="588" rx="21" fill="none" stroke="#29455d"/>
 
   <g font-family="Inter,Arial,sans-serif">
-    <text x="48" y="46" fill="#f8fafc" font-size="25" font-weight="700">Reordered Vocabulary Pruning</text>
-    <text x="48" y="72" fill="#91a7ba" font-size="14">Reorder once during export. Generate directly from a compact output prefix.</text>
+    <text x="48" y="43" fill="#f8fafc" font-size="24" font-weight="700">Stable Partition: Build a Compact Output Prefix</text>
+    <text x="48" y="68" fill="#91a7ba" font-size="13">The same one-time permutation reorders tokenizer IDs and full Embedding rows.</text>
 
-    <text x="48" y="108" fill="#8ca5ba" font-size="11" font-weight="700" letter-spacing="1.4">BEFORE</text>
-    <rect x="48" y="120" width="334" height="200" rx="14" fill="#0c1d2c" stroke="#35516a"/>
-    <text x="70" y="145" fill="#dbeafe" font-size="14" font-weight="700">Original IDs + Embedding rows</text>
-
-    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">
-      <rect x="70" y="158" width="286" height="29" rx="6" fill="#11384e"/>
-      <text x="84" y="177" fill="#67e8f9">old 2</text><text x="151" y="177" fill="#dbeafe">KEEP</text><text x="220" y="177" fill="#8ca5ba">E[2]</text>
-      <rect x="70" y="197" width="286" height="29" rx="6" fill="#1a2b3b"/>
-      <text x="84" y="216" fill="#94a3b8">old 5</text><text x="151" y="216" fill="#94a3b8">INPUT ONLY</text><text x="260" y="216" fill="#73889b">E[5]</text>
-      <rect x="70" y="236" width="286" height="29" rx="6" fill="#11384e"/>
-      <text x="84" y="255" fill="#67e8f9">old 8</text><text x="151" y="255" fill="#dbeafe">KEEP</text><text x="220" y="255" fill="#8ca5ba">E[8]</text>
-      <rect x="70" y="275" width="286" height="29" rx="6" fill="#272149"/>
-      <text x="84" y="294" fill="#d8b4fe">old 11</text><text x="151" y="294" fill="#f5d0fe">KEEP · EOS</text><text x="260" y="294" fill="#a78bfa">E[11]</text>
+    <g transform="translate(835 34)">
+      <rect width="15" height="15" rx="4" fill="#0c6ea0" stroke="#38bdf8"/>
+      <text x="23" y="12" fill="#bae6fd" font-size="11">can generate</text>
+      <rect x="120" width="15" height="15" rx="4" fill="#92400e" stroke="#f59e0b"/>
+      <text x="143" y="12" fill="#fde68a" font-size="11">input only</text>
     </g>
+
+    <text x="48" y="103" fill="#8ca5ba" font-size="11" font-weight="700" letter-spacing="1.3">ORIGINAL ORDER · COLORS ARE CLASSIFICATION</text>
+    <rect x="48" y="115" width="404" height="265" rx="14" fill="#0b1b29" stroke="#35516a"/>
+    <text x="70" y="134" fill="#9fb4c7" font-size="11">Output and input-only tokens are interleaved.</text>
 
     <g text-anchor="middle">
-      <path d="M414 212H501" stroke="#7891a8" stroke-width="2" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
-      <text x="457" y="187" fill="#e2e8f0" font-size="12" font-weight="700">ONE TIME</text>
-      <text x="457" y="203" fill="#67e8f9" font-size="11">same permutation P</text>
+      <circle cx="530" cy="241" r="50" fill="#0b1b29" stroke="#41627c"/>
+      <text x="530" y="230" fill="#f8fafc" font-size="12" font-weight="700">STABLE</text>
+      <text x="530" y="247" fill="#67e8f9" font-size="12" font-weight="700">PARTITION P</text>
+      <text x="530" y="266" fill="#8299ad" font-size="10">export time only</text>
     </g>
 
-    <text x="536" y="108" fill="#67e8f9" font-size="11" font-weight="700" letter-spacing="1.4">AFTER EXPORT</text>
-    <rect x="536" y="120" width="616" height="200" rx="14" fill="#0c1d2c" stroke="#22d3ee"/>
-    <text x="558" y="145" fill="#dbeafe" font-size="14" font-weight="700">Reordered tokenizer and full Embedding stay aligned</text>
+    <text x="608" y="103" fill="#67e8f9" font-size="11" font-weight="700" letter-spacing="1.3">REORDERED IDS + EMBEDDING ROWS</text>
+    <rect x="608" y="115" width="544" height="265" rx="14" fill="#0b1b29" stroke="#22d3ee"/>
+    <text x="630" y="134" fill="#9fb4c7" font-size="11">Relative order is preserved inside each color group.</text>
+    <path d="M620 254H1138" stroke="#34d399" stroke-width="1.5" stroke-dasharray="6 5"/>
+    <text x="1138" y="249" text-anchor="end" fill="#6ee7b7" font-size="10" font-weight="700">OUTPUT PREFIX [0, K)</text>
 
-    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">
-      <rect x="558" y="158" width="392" height="29" rx="6" fill="url(#keep)"/>
-      <text x="572" y="177" fill="#041823">new 0 ← old 2</text><text x="710" y="177" fill="#041823">KEEP</text><text x="800" y="177" fill="#041823">E_new[0] = E_old[2]</text>
-      <rect x="558" y="197" width="392" height="29" rx="6" fill="url(#keep)"/>
-      <text x="572" y="216" fill="#041823">new 1 ← old 8</text><text x="710" y="216" fill="#041823">KEEP</text><text x="800" y="216" fill="#041823">E_new[1] = E_old[8]</text>
-      <rect x="558" y="236" width="392" height="29" rx="6" fill="url(#head)"/>
-      <text x="572" y="255" fill="#fff">new 2 ← old 11</text><text x="710" y="255" fill="#fff">KEEP · EOS</text><text x="820" y="255" fill="#fff">E_new[2] = E_old[11]</text>
-      <path d="M552 273H1128" stroke="#34d399" stroke-width="1.4" stroke-dasharray="5 4"/>
-      <text x="1128" y="268" text-anchor="end" fill="#6ee7b7" font-family="Inter,Arial,sans-serif" font-size="10" font-weight="700">OUTPUT PREFIX K</text>
-      <rect x="558" y="282" width="392" height="29" rx="6" fill="#1a2b3b"/>
-      <text x="572" y="301" fill="#94a3b8">new 3 ← old 5</text><text x="710" y="301" fill="#94a3b8">INPUT ONLY</text><text x="820" y="301" fill="#73889b">E_new[3] = E_old[5]</text>
+    <g transform="translate(70 142)">
+      <animateTransform attributeName="transform" type="translate" dur="8s" repeatCount="indefinite"
+        values="70 142;70 142;630 142;630 142;70 142"
+        keyTimes="0;0.20;0.50;0.88;1"/>
+      <rect width="360" height="30" rx="7" fill="url(#outputRow)" stroke="#38bdf8" stroke-opacity=".75"/>
+      <text x="14" y="20" fill="#f8fafc" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">
+        old 2 · zh_token
+        <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="1;1;0;0;1" keyTimes="0;0.20;0.50;0.88;1"/>
+      </text>
+      <text x="14" y="20" fill="#f8fafc" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12" opacity="0">
+        new 0 ← old 2 · zh_token
+        <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.20;0.50;0.88;1"/>
+      </text>
+      <text x="344" y="20" text-anchor="end" fill="#dff8ff" font-family="Inter,Arial,sans-serif" font-size="10" font-weight="700">OUTPUT</text>
+    </g>
+    <g transform="translate(70 178)">
+      <animateTransform attributeName="transform" type="translate" dur="8s" repeatCount="indefinite"
+        values="70 178;70 178;630 266;630 266;70 178"
+        keyTimes="0;0.20;0.50;0.88;1"/>
+      <rect width="360" height="30" rx="7" fill="url(#inputRow)" stroke="#f59e0b" stroke-opacity=".75"/>
+      <text x="14" y="20" fill="#f8fafc" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">
+        old 5 · fr_token
+        <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="1;1;0;0;1" keyTimes="0;0.20;0.50;0.88;1"/>
+      </text>
+      <text x="14" y="20" fill="#f8fafc" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12" opacity="0">
+        new 3 ← old 5 · fr_token
+        <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.20;0.50;0.88;1"/>
+      </text>
+      <text x="344" y="20" text-anchor="end" fill="#fff2cf" font-family="Inter,Arial,sans-serif" font-size="10" font-weight="700">INPUT ONLY</text>
+    </g>
+    <g transform="translate(70 214)">
+      <animateTransform attributeName="transform" type="translate" dur="8s" repeatCount="indefinite"
+        values="70 214;70 214;630 178;630 178;70 214"
+        keyTimes="0;0.20;0.50;0.88;1"/>
+      <rect width="360" height="30" rx="7" fill="url(#outputRow)" stroke="#38bdf8" stroke-opacity=".75"/>
+      <text x="14" y="20" fill="#f8fafc" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">
+        old 8 · punct
+        <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="1;1;0;0;1" keyTimes="0;0.20;0.50;0.88;1"/>
+      </text>
+      <text x="14" y="20" fill="#f8fafc" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12" opacity="0">
+        new 1 ← old 8 · punct
+        <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.20;0.50;0.88;1"/>
+      </text>
+      <text x="344" y="20" text-anchor="end" fill="#dff8ff" font-family="Inter,Arial,sans-serif" font-size="10" font-weight="700">OUTPUT</text>
+    </g>
+    <g transform="translate(70 250)">
+      <animateTransform attributeName="transform" type="translate" dur="8s" repeatCount="indefinite"
+        values="70 250;70 250;630 302;630 302;70 250"
+        keyTimes="0;0.20;0.50;0.88;1"/>
+      <rect width="360" height="30" rx="7" fill="url(#inputRow)" stroke="#f59e0b" stroke-opacity=".75"/>
+      <text x="14" y="20" fill="#f8fafc" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">
+        old 14 · ar_token
+        <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="1;1;0;0;1" keyTimes="0;0.20;0.50;0.88;1"/>
+      </text>
+      <text x="14" y="20" fill="#f8fafc" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12" opacity="0">
+        new 4 ← old 14 · ar_token
+        <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.20;0.50;0.88;1"/>
+      </text>
+      <text x="344" y="20" text-anchor="end" fill="#fff2cf" font-family="Inter,Arial,sans-serif" font-size="10" font-weight="700">INPUT ONLY</text>
+    </g>
+    <g transform="translate(70 286)">
+      <animateTransform attributeName="transform" type="translate" dur="8s" repeatCount="indefinite"
+        values="70 286;70 286;630 214;630 214;70 286"
+        keyTimes="0;0.20;0.50;0.88;1"/>
+      <rect width="360" height="30" rx="7" fill="url(#outputRow)" stroke="#38bdf8" stroke-opacity=".75"/>
+      <text x="14" y="20" fill="#f8fafc" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">
+        old 21 · 123
+        <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="1;1;0;0;1" keyTimes="0;0.20;0.50;0.88;1"/>
+      </text>
+      <text x="14" y="20" fill="#f8fafc" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12" opacity="0">
+        new 2 ← old 21 · 123
+        <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.20;0.50;0.88;1"/>
+      </text>
+      <text x="344" y="20" text-anchor="end" fill="#dff8ff" font-family="Inter,Arial,sans-serif" font-size="10" font-weight="700">OUTPUT</text>
+    </g>
+    <g transform="translate(70 322)">
+      <animateTransform attributeName="transform" type="translate" dur="8s" repeatCount="indefinite"
+        values="70 322;70 322;630 338;630 338;70 322"
+        keyTimes="0;0.20;0.50;0.88;1"/>
+      <rect width="360" height="30" rx="7" fill="url(#inputRow)" stroke="#f59e0b" stroke-opacity=".75"/>
+      <text x="14" y="20" fill="#f8fafc" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">
+        old 34 · ru_token
+        <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="1;1;0;0;1" keyTimes="0;0.20;0.50;0.88;1"/>
+      </text>
+      <text x="14" y="20" fill="#f8fafc" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12" opacity="0">
+        new 5 ← old 34 · ru_token
+        <animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.20;0.50;0.88;1"/>
+      </text>
+      <text x="344" y="20" text-anchor="end" fill="#fff2cf" font-family="Inter,Arial,sans-serif" font-size="10" font-weight="700">INPUT ONLY</text>
     </g>
 
-    <g transform="translate(978 164)">
-      <rect width="150" height="88" rx="10" fill="#091723" stroke="#324b60"/>
-      <text x="75" y="25" text-anchor="middle" fill="#dbeafe" font-size="11" font-weight="700">Invariant</text>
-      <text x="14" y="50" fill="#67e8f9" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10">token(t) → new j</text>
-      <text x="14" y="69" fill="#67e8f9" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10">lookup(j) → same E</text>
-    </g>
-
-    <g fill="#67e8f9" filter="url(#glow)">
-      <circle r="4"><animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#move-a"/></animateMotion></circle>
-      <circle r="4"><animateMotion dur="2.6s" begin=".4s" repeatCount="indefinite"><mpath href="#move-b"/></animateMotion></circle>
-      <circle r="4" fill="#d8b4fe"><animateMotion dur="2.6s" begin=".8s" repeatCount="indefinite"><mpath href="#move-c"/></animateMotion></circle>
-      <circle r="4" fill="#94a3b8"><animateMotion dur="2.6s" begin="1.2s" repeatCount="indefinite"><mpath href="#move-d"/></animateMotion></circle>
-    </g>
-
-    <text x="48" y="348" fill="#a78bfa" font-size="11" font-weight="700" letter-spacing="1.4">RUNTIME · NO ID MAP</text>
-    <rect x="48" y="362" width="1104" height="98" rx="14" fill="#0a1a28" stroke="#2d465b"/>
+    <text x="48" y="421" fill="#a78bfa" font-size="11" font-weight="700" letter-spacing="1.3">RUNTIME RESULT</text>
+    <rect x="48" y="434" width="1104" height="104" rx="14" fill="#091824" stroke="#2d465b"/>
 
     <g text-anchor="middle">
-      <g><rect x="70" y="384" width="144" height="44" rx="9" fill="#10283a" stroke="#3c5c74"/><text x="142" y="402" fill="#dbeafe" font-size="11" font-weight="700">New token IDs</text><text x="142" y="418" fill="#8ca5ba" font-size="10">0..V_input−1</text></g>
-      <g><rect x="280" y="384" width="174" height="44" rx="9" fill="#10283a" stroke="#22d3ee"/><text x="367" y="402" fill="#dbeafe" font-size="11" font-weight="700">Full Embedding</text><text x="367" y="418" fill="#67e8f9" font-size="10">[V_input, H]</text></g>
-      <g><rect x="520" y="384" width="142" height="44" rx="9" fill="#10283a" stroke="#526e8b"/><text x="591" y="411" fill="#dbeafe" font-size="11" font-weight="700">Transformer</text></g>
-      <g><rect x="728" y="384" width="174" height="44" rx="9" fill="#10283a" stroke="#a855f7"/><text x="815" y="402" fill="#dbeafe" font-size="11" font-weight="700">Compact LM Head</text><text x="815" y="418" fill="#d8b4fe" font-size="10">logits [..., K]</text></g>
-      <g><rect x="968" y="384" width="160" height="44" rx="9" fill="#10283a" stroke="#34d399"/><text x="1048" y="402" fill="#dbeafe" font-size="11" font-weight="700">Direct decode</text><text x="1048" y="418" fill="#6ee7b7" font-size="10">no scatter · no map</text></g>
+      <g>
+        <rect x="70" y="459" width="194" height="52" rx="9" fill="#10283a" stroke="#22d3ee"/>
+        <text x="167" y="480" fill="#e0f2fe" font-size="11" font-weight="700">Reordered tokenizer</text>
+        <text x="167" y="498" fill="#7dd3fc" font-size="10">full IDs 0 ... V_input−1</text>
+      </g>
+      <g>
+        <rect x="318" y="459" width="194" height="52" rx="9" fill="#10283a" stroke="#22d3ee"/>
+        <text x="415" y="480" fill="#e0f2fe" font-size="11" font-weight="700">Full Embedding</text>
+        <text x="415" y="498" fill="#7dd3fc" font-size="10">[V_input, H]</text>
+      </g>
+      <g>
+        <rect x="566" y="459" width="150" height="52" rx="9" fill="#10283a" stroke="#526e8b"/>
+        <text x="641" y="490" fill="#e2e8f0" font-size="11" font-weight="700">Transformer</text>
+      </g>
+      <g>
+        <rect x="770" y="459" width="174" height="52" rx="9" fill="url(#head)" stroke="#c084fc"/>
+        <text x="857" y="480" fill="#fff" font-size="11" font-weight="700">Compact LM Head</text>
+        <text x="857" y="498" fill="#f5d0fe" font-size="10">logits [..., K]</text>
+      </g>
+      <g>
+        <rect x="998" y="459" width="132" height="52" rx="9" fill="#0c3b35" stroke="#34d399"/>
+        <text x="1064" y="480" fill="#d1fae5" font-size="11" font-weight="700">Direct IDs</text>
+        <text x="1064" y="498" fill="#6ee7b7" font-size="10">no runtime map</text>
+      </g>
     </g>
 
     <g fill="none" stroke="#7891a8" stroke-width="2" marker-end="url(#arrow)">
-      <path d="M214 406H280"/><path d="M454 406H520"/><path d="M662 406H728"/><path d="M902 406H968"/>
+      <path d="M264 485H318"/>
+      <path d="M512 485H566"/>
+      <path d="M716 485H770"/>
+      <path d="M944 485H998"/>
     </g>
-    <circle r="4" fill="#67e8f9" filter="url(#glow)"><animateMotion dur="3s" repeatCount="indefinite"><mpath href="#runtime"/></animateMotion></circle>
 
-    <text x="600" y="482" text-anchor="middle" fill="#8299ad" font-size="11">All input vectors remain available. Only IDs in the prefix [0, K) can be generated.</text>
+    <text x="600" y="564" text-anchor="middle" fill="#8299ad" font-size="11">Blue rows become LM Head rows 0..K−1. Amber rows remain available only to the input Embedding.</text>
   </g>
 </svg>

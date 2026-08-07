@@ -132,6 +132,18 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 | [兼容性说明](docs/compatibility.md) | tokenizer、特殊 Token、生成处理器、训练边界 |
 | [验证报告](docs/validation.md) | 单元测试与 Qwen/Gemma 真实权重端到端结果 |
 
+## 更新日志
+
+仅记录影响模型结构、使用方式或验证范围的重要变化。
+
+| 日期 | 类型 | 重要变化 |
+|---|---|---|
+| 2026-08-07 | 可视化 | 重做算法动画：Token 行实际从交错旧顺序移动到“输出前缀 + 仅输入尾部”，并用一致颜色展示稳定分组。 |
+| 2026-08-06 | 架构 | 用 tokenizer/Embedding 同步重排替代 LM Head 后的运行时映射；logits 直接缩小为 `[..., V_output]`。 |
+| 2026-08-06 | 工程 | 删除旧映射兼容残留；README 精简为操作入口，原理、兼容性和验证报告迁移到 `docs/`。 |
+| 2026-08-05 | 模型支持 | 完成 Qwen2/Qwen2.5 与纯文本 Gemma 3 适配，并在官方 0.5B/270M 权重上验证保存、重载和生成。 |
+| 2026-07-23 | Token 筛选 | 增加外语字符、代码/HTML Token 和低频英文 Token 的删除清单生成规则。 |
+
 ## 测试
 
 ```bash
