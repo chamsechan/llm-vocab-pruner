@@ -12,10 +12,13 @@ from transformers.generation.logits_process import (
     NoRepeatNGramLogitsProcessor,
     RepetitionPenaltyLogitsProcessor,
     SequenceBiasLogitsProcessor,
-    _calc_banned_ngram_tokens,
 )
 from transformers.models.gemma3.modeling_gemma3 import Gemma3ForCausalLM
 from transformers.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
+from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM
+from transformers.models.qwen3_5.modeling_qwen3_5 import (
+    Qwen3_5ForConditionalGeneration,
+)
 
 
 class _CompactRepetitionPenaltyLogitsProcessor(LogitsProcessor):
@@ -83,13 +86,24 @@ class _CompactNoRepeatNGramLogitsProcessor(LogitsProcessor):
         self.ngram_size = ngram_size
 
     def __call__(self, input_ids, scores):
-        banned = _calc_banned_ngram_tokens(
-            self.ngram_size, input_ids, scores.shape[0], input_ids.shape[-1]
-        )
+        current_length = input_ids.shape[-1]
+        if current_length < self.ngram_size:
+            return scores
+
         processed = scores.clone()
-        for batch_index, token_ids in enumerate(banned):
+        prefix_size = self.ngram_size - 1
+        for batch_index in range(input_ids.shape[0]):
+            tokens = input_ids[batch_index].tolist()
+            prefix = tuple(tokens[-prefix_size:]) if prefix_size else ()
+            banned_ids = set()
+            for start in range(current_length - self.ngram_size + 1):
+                ngram = tokens[start : start + self.ngram_size]
+                if tuple(ngram[:-1]) == prefix:
+                    banned_ids.add(ngram[-1])
             valid_ids = [
-                token_id for token_id in token_ids if token_id < scores.shape[-1]
+                token_id
+                for token_id in banned_ids
+                if 0 <= token_id < scores.shape[-1]
             ]
             if valid_ids:
                 processed[batch_index, valid_ids] = -float("inf")
@@ -103,13 +117,14 @@ class _AsymmetricOutputVocabMixin:
         output_vocab_size = getattr(config, "output_vocab_size", None)
         if not isinstance(output_vocab_size, int) or output_vocab_size <= 0:
             raise ValueError("output_vocab_size must be a positive integer.")
-        if output_vocab_size > config.vocab_size:
-            raise ValueError("output_vocab_size cannot exceed vocab_size.")
-
         embedding = self.get_input_embeddings()
+        input_vocab_size, hidden_size = embedding.weight.shape
+        if output_vocab_size > input_vocab_size:
+            raise ValueError("output_vocab_size cannot exceed the input vocabulary.")
+
         self.set_output_embeddings(
             nn.Linear(
-                config.hidden_size,
+                hidden_size,
                 output_vocab_size,
                 bias=False,
                 device=embedding.weight.device,
@@ -117,6 +132,9 @@ class _AsymmetricOutputVocabMixin:
             )
         )
         config.tie_word_embeddings = False
+        text_config = getattr(config, "text_config", None)
+        if text_config is not None:
+            text_config.tie_word_embeddings = False
         config.vocab_reordered = True
 
     def _get_logits_processor(self, *args, **kwargs):
@@ -136,8 +154,25 @@ class _AsymmetricOutputVocabMixin:
                 )
         return processors
 
-    def forward(self, *args, labels: Optional[torch.LongTensor] = None, **kwargs):
-        outputs = super().forward(*args, labels=None, **kwargs)
+    def forward(
+        self,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values=None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        **kwargs,
+    ):
+        outputs = super().forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            labels=None,
+            **kwargs,
+        )
         if labels is not None:
             valid_labels = labels[labels != -100]
             if valid_labels.numel() and (
@@ -166,6 +201,27 @@ class AsymmetricQwen2ForCausalLM(_AsymmetricOutputVocabMixin, Qwen2ForCausalLM):
         self._init_asymmetric_output(config)
 
 
+class AsymmetricQwen3ForCausalLM(_AsymmetricOutputVocabMixin, Qwen3ForCausalLM):
+    """Qwen3 with a reordered full input and compact output prefix."""
+
+    def __init__(self, config):
+        config.tie_word_embeddings = False
+        super().__init__(config)
+        self._init_asymmetric_output(config)
+
+
+class AsymmetricQwen3_5ForConditionalGeneration(
+    _AsymmetricOutputVocabMixin, Qwen3_5ForConditionalGeneration
+):
+    """Qwen3.5 with a reordered full text embedding and compact LM head."""
+
+    def __init__(self, config):
+        config.tie_word_embeddings = False
+        config.text_config.tie_word_embeddings = False
+        super().__init__(config)
+        self._init_asymmetric_output(config)
+
+
 class AsymmetricGemma3ForCausalLM(_AsymmetricOutputVocabMixin, Gemma3ForCausalLM):
     """Text-only Gemma 3 with a reordered full input and compact output prefix."""
 
@@ -176,8 +232,14 @@ class AsymmetricGemma3ForCausalLM(_AsymmetricOutputVocabMixin, Gemma3ForCausalLM
 
 
 _SUPPORTED_MODEL_ADAPTERS = (
-    (Qwen2ForCausalLM, AsymmetricQwen2ForCausalLM),
-    (Gemma3ForCausalLM, AsymmetricGemma3ForCausalLM),
+    (Qwen2ForCausalLM, AsymmetricQwen2ForCausalLM, "AutoModelForCausalLM"),
+    (Qwen3ForCausalLM, AsymmetricQwen3ForCausalLM, "AutoModelForCausalLM"),
+    (
+        Qwen3_5ForConditionalGeneration,
+        AsymmetricQwen3_5ForConditionalGeneration,
+        "AutoModelForImageTextToText",
+    ),
+    (Gemma3ForCausalLM, AsymmetricGemma3ForCausalLM, "AutoModelForCausalLM"),
 )
 
 _GENERATION_TOKEN_FIELDS = (
@@ -191,6 +253,10 @@ _GENERATION_TOKEN_FIELDS = (
     "begin_suppress_tokens",
     "bad_words_ids",
     "force_words_ids",
+    "image_token_id",
+    "video_token_id",
+    "vision_start_token_id",
+    "vision_end_token_id",
 )
 
 
@@ -331,7 +397,12 @@ def _required_generation_token_ids(model):
         "forced_eos_token_id",
     )
     required = set()
-    for config in (model.config, getattr(model, "generation_config", None)):
+    configs = [
+        model.config,
+        getattr(model.config, "text_config", None),
+        getattr(model, "generation_config", None),
+    ]
+    for config in configs:
         if config is None:
             continue
         for field in required_fields:
@@ -351,21 +422,23 @@ def convert_to_reordered_output_vocab(model, tokenizer, keep_old_ids: Iterable[i
     if getattr(model.config, "vocab_reordered", False):
         raise ValueError("The model vocabulary has already been reordered.")
 
-    asymmetric_class = next(
+    adapter = next(
         (
-            target_class
-            for source_class, target_class in _SUPPORTED_MODEL_ADAPTERS
+            (target_class, auto_class)
+            for source_class, target_class, auto_class in _SUPPORTED_MODEL_ADAPTERS
             if isinstance(model, source_class)
         ),
         None,
     )
-    if asymmetric_class is None:
+    if adapter is None:
         supported = ", ".join(
-            source_class.__name__ for source_class, _ in _SUPPORTED_MODEL_ADAPTERS
+            source_class.__name__
+            for source_class, _, _ in _SUPPORTED_MODEL_ADAPTERS
         )
         raise TypeError(
             f"Unsupported model class {type(model).__name__}. Supported: {supported}."
         )
+    asymmetric_class, auto_class = adapter
 
     keep_old_ids = sorted(set(keep_old_ids))
     if not keep_old_ids:
@@ -441,10 +514,14 @@ def convert_to_reordered_output_vocab(model, tokenizer, keep_old_ids: Iterable[i
 
     model.__class__ = asymmetric_class
     model.config.vocab_size = input_vocab_size
+    text_config = getattr(model.config, "text_config", None)
+    if text_config is not None:
+        text_config.vocab_size = input_vocab_size
+        text_config.tie_word_embeddings = False
     model.config.output_vocab_size = len(keep_old_ids)
     model.config.vocab_reordered = True
     model.config.tie_word_embeddings = False
     model.config.architectures = [asymmetric_class.__name__]
 
-    asymmetric_class.register_for_auto_class("AutoModelForCausalLM")
+    asymmetric_class.register_for_auto_class(auto_class)
     return model, reordered_tokenizer

@@ -10,7 +10,12 @@ import os
 import time
 import argparse
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoModelForImageTextToText,
+    AutoTokenizer,
+)
 
 from asymmetric_models import convert_to_reordered_output_vocab
 
@@ -19,6 +24,13 @@ TEST_PROMPTS = [
     "请写一段 Python 代码，用快速排序算法对整数列表进行排序。",
     "What are the primary benefits of artificial intelligence in healthcare?",
 ]
+
+
+def model_loader_for_config(config):
+    """Select the native auto-model family for a source or exported config."""
+    if getattr(config, "model_type", None) == "qwen3_5":
+        return AutoModelForImageTextToText
+    return AutoModelForCausalLM
 
 
 def load_delete_ids_from_txt(txt_path):
@@ -120,13 +132,17 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     orig_tokenizer = AutoTokenizer.from_pretrained(
         model_name_or_path, trust_remote_code=True
     )
-    model = AutoModelForCausalLM.from_pretrained(
+    source_config = AutoConfig.from_pretrained(
+        model_name_or_path, trust_remote_code=True
+    )
+    source_model_loader = model_loader_for_config(source_config)
+    model = source_model_loader.from_pretrained(
         model_name_or_path,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+        dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
         trust_remote_code=True,
     )
 
-    orig_vocab_size = model.config.vocab_size
+    orig_vocab_size = model.get_input_embeddings().weight.shape[0]
     orig_params = sum(p.numel() for p in model.parameters())
     orig_embed_params = model.get_input_embeddings().weight.numel()
     orig_lm_head_params = model.get_output_embeddings().weight.numel()
@@ -170,9 +186,13 @@ def prune_model_by_txt(model_name_or_path, delete_txt_path, output_dir):
     pruned_tokenizer = AutoTokenizer.from_pretrained(
         output_dir, trust_remote_code=True, fix_mistral_regex=False
     )
-    pruned_model = AutoModelForCausalLM.from_pretrained(
+    exported_config = AutoConfig.from_pretrained(
+        output_dir, trust_remote_code=True
+    )
+    exported_model_loader = model_loader_for_config(exported_config)
+    pruned_model = exported_model_loader.from_pretrained(
         output_dir,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+        dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
         device_map="auto" if torch.cuda.is_available() else None,
         trust_remote_code=True,
     )

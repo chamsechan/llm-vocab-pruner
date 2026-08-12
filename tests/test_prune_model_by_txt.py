@@ -1,9 +1,32 @@
 import unittest
 
 import torch.nn as nn
-from transformers import Qwen2Config
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForImageTextToText,
+    Qwen2Config,
+    Qwen3_5Config,
+)
 
-from prune_model_by_txt import select_output_token_ids, validate_exported_model
+from prune_model_by_txt import (
+    model_loader_for_config,
+    select_output_token_ids,
+    validate_exported_model,
+)
+
+
+class ModelLoaderSelectionTest(unittest.TestCase):
+    def test_uses_image_text_loader_for_qwen3_5(self):
+        self.assertIs(
+            model_loader_for_config(Qwen3_5Config()),
+            AutoModelForImageTextToText,
+        )
+
+    def test_uses_causal_lm_loader_for_decoder_only_model(self):
+        self.assertIs(
+            model_loader_for_config(Qwen2Config()),
+            AutoModelForCausalLM,
+        )
 
 
 class FakeGemmaTokenizer:
