@@ -23,18 +23,25 @@
 
 ## 支持范围
 
-| 架构 | 状态 | 验证 |
-|---|---|---|
-| Qwen2 / Qwen2.5 | 支持 | 转换、生成、保存与独立重载 |
-| Qwen3 | 支持 | 转换、生成、保存与独立重载 |
-| Qwen3.5 | 文本输入支持 | `Qwen3_5ForConditionalGeneration` 文本路径；图像/视频未验证 |
-| Gemma 3 text | 支持 | 转换、生成、保存与独立重载 |
-| `Qwen/Qwen2.5-0.5B-Instruct` | 真实权重通过 | Embedding、logits、独立 Demo 一致 |
-| `Qwen/Qwen3-0.6B` | 真实权重通过 | Embedding、logits、独立 Demo 一致 |
-| `Qwen/Qwen3.5-0.8B` | 真实权重文本路径通过 | Embedding、logits、独立 Demo 一致 |
-| `google/gemma-3-270m-it` | 真实权重通过 | Embedding、logits、独立 Demo 一致 |
-| Gemma 3 multimodal | 暂不支持 | 不支持 `Gemma3ForConditionalGeneration` |
-| 其他 decoder-only 模型 | 可扩展 | 需要增加对应适配器和测试 |
+状态：✅ 已支持并验证　⚠️ 部分路径支持　❌ 暂不支持　🧩 需要适配
+
+| 架构 | 状态 | 已覆盖范围 | 限制 |
+|---|:---:|---|---|
+| Qwen2 / Qwen2.5 | ✅ | 文本转换、生成、保存与独立重载 | — |
+| Qwen3 | ✅ | 文本转换、生成、保存与独立重载 | — |
+| Qwen3.5 | ⚠️ | `Qwen3_5ForConditionalGeneration` 文本输入与文本生成 | 图像、视频及多模态端到端路径未验证 |
+| Gemma 3 text | ✅ | 文本转换、生成、保存与独立重载 | — |
+| Gemma 3 multimodal | ❌ | — | 不支持 `Gemma3ForConditionalGeneration` |
+| 其他 decoder-only 模型 | 🧩 | 原理可扩展 | 需要增加对应适配器和测试 |
+
+### 官方权重验证
+
+| 模型 | 重排与裁剪 | 完整输入 Embedding | LM Head 缩小并解绑定 | 保存与独立重载 | 独立 Demo |
+|---|:---:|:---:|:---:|:---:|:---:|
+| `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `Qwen/Qwen3-0.6B` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `Qwen/Qwen3.5-0.8B`（文本路径） | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `google/gemma-3-270m-it` | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ## 快速开始
 
