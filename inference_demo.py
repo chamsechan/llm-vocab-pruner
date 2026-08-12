@@ -4,7 +4,12 @@
 import argparse
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoModelForImageTextToText,
+    AutoTokenizer,
+)
 
 
 def main():
@@ -15,6 +20,11 @@ def main():
         default="Translate into Chinese: Artificial intelligence is changing the world.",
     )
     parser.add_argument("--max_new_tokens", type=int, default=64)
+    parser.add_argument(
+        "--disable-thinking",
+        action="store_true",
+        help="Pass enable_thinking=False to chat templates that support it (for example Qwen3).",
+    )
     args = parser.parse_args()
 
     tokenizer = AutoTokenizer.from_pretrained(
@@ -23,11 +33,21 @@ def main():
         local_files_only=True,
         fix_mistral_regex=False,
     )
-    model = AutoModelForCausalLM.from_pretrained(
+    config = AutoConfig.from_pretrained(
         args.model,
         trust_remote_code=True,
         local_files_only=True,
-        torch_dtype="auto",
+    )
+    model_loader = (
+        AutoModelForImageTextToText
+        if getattr(config, "model_type", None) == "qwen3_5"
+        else AutoModelForCausalLM
+    )
+    model = model_loader.from_pretrained(
+        args.model,
+        trust_remote_code=True,
+        local_files_only=True,
+        dtype="auto",
         device_map="auto" if torch.cuda.is_available() else None,
     ).eval()
 
@@ -39,10 +59,14 @@ def main():
         raise RuntimeError("A reordered export must not contain a runtime ID map.")
 
     if tokenizer.chat_template:
+        template_kwargs = {}
+        if args.disable_thinking:
+            template_kwargs["enable_thinking"] = False
         text = tokenizer.apply_chat_template(
             [{"role": "user", "content": args.prompt}],
             tokenize=False,
             add_generation_prompt=True,
+            **template_kwargs,
         )
     else:
         text = args.prompt

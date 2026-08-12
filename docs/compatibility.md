@@ -7,11 +7,13 @@
 | 架构 | 状态 |
 |---|---|
 | Qwen2 / Qwen2.5 | 支持 |
+| Qwen3 / `Qwen3ForCausalLM` | 支持 |
+| Qwen3.5 / `Qwen3_5ForConditionalGeneration` | 文本输入路径支持；图像/视频未验证 |
 | Gemma 3 text / `Gemma3ForCausalLM` | 支持 |
 | Gemma 3 multimodal / `Gemma3ForConditionalGeneration` | 暂不支持 |
 | 其他 decoder-only 模型 | 需要增加适配器与测试 |
 
-该实现是可扩展的 decoder-only 方案，不依赖特定目标语言；当前只在 Qwen2/Qwen2.5 和纯文本 Gemma 3 上完成验证。
+该实现不依赖特定目标语言；当前已在 Qwen2/Qwen2.5、Qwen3、Qwen3.5 文本输入路径和纯文本 Gemma 3 上完成验证。
 
 ## Fast tokenizer 要求
 
@@ -30,6 +32,21 @@
 
 Qwen 的部分 special/added tokens 不在基础 BPE vocab 中。重排时会把这些 Token 同步纳入新 ID 布局，同时保留 added-token 匹配和特殊 Token 语义。
 
+Qwen3 默认可能启用 thinking 模式。独立 Demo 可传入 `--disable-thinking`，由 chat template 设置 `enable_thinking=false`；这只改变对话模板，不改变词表重排与 LM Head 裁剪逻辑。
+
+## Qwen3.5 文本输入路径
+
+`Qwen/Qwen3.5-0.8B` 的官方架构是原生多模态 `Qwen3_5ForConditionalGeneration`。本项目当前验证并支持其中的**纯文本输入与文本生成路径**：
+
+- 保留完整文本 Embedding 和模型主体（包括原模型的视觉模块）；
+- 使用 `AutoModelForImageTextToText` 加载源模型和导出模型；
+- tokenizer、文本 Embedding 及模型配置中的 image/video/vision 特殊 ID 使用同一排列重映射；
+- LM Head 只保留连续输出前缀。
+
+当前导出流程不保存 `AutoProcessor` 的图像/视频处理配置，也未执行图像或视频输入的端到端等价性测试。因此，不能把文本路径验证结果视为完整多模态支持。
+
+Qwen3.5 需要 `transformers>=5.12.0`；旧版 Transformers 不包含官方 Qwen3.5 实现。
+
 ## Gemma tokenizer-only Token
 
 `google/gemma-3-270m-it` 的 `<image_soft_token>` ID 为 `262144`，纯文本 Embedding 行范围是 `0..262143`。该 Token 没有文本 Embedding 行，因此：
@@ -41,7 +58,7 @@ Qwen 的部分 special/added tokens 不在基础 BPE vocab 中。重排时会把
 
 Gemma 导出目录只保存正确重排后的 `tokenizer.json`，不会附带仍使用旧 ID 的 `tokenizer.model`。
 
-Transformers 4.57.x 如果对本地非 Mistral tokenizer 产生 regex 误报告警，可显式传入：
+如果 Transformers 对本地非 Mistral tokenizer 产生 regex 误报告警，可显式传入：
 
 ```python
 tokenizer = AutoTokenizer.from_pretrained(

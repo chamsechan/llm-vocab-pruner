@@ -8,23 +8,33 @@ from accelerate import init_empty_weights
 from tokenizers import Tokenizer, models, pre_tokenizers
 from transformers import (
     AutoModelForCausalLM,
+    AutoModelForImageTextToText,
     AutoTokenizer,
     Gemma3TextConfig,
     PreTrainedTokenizerFast,
     Qwen2Config,
     Qwen2ForCausalLM,
+    Qwen3Config,
+    Qwen3ForCausalLM,
+    Qwen3_5Config,
+    Qwen3_5ForConditionalGeneration,
+    Qwen3_5TextConfig,
+    Qwen3_5VisionConfig,
     Gemma3ForCausalLM,
 )
 
 from asymmetric_models import (
     AsymmetricGemma3ForCausalLM,
     AsymmetricQwen2ForCausalLM,
+    AsymmetricQwen3ForCausalLM,
+    AsymmetricQwen3_5ForConditionalGeneration,
     convert_to_reordered_output_vocab,
 )
 
 
 class AsymmetricModelContract:
     asymmetric_class = None
+    auto_model_class = AutoModelForCausalLM
 
     def make_model(self):
         raise NotImplementedError
@@ -79,7 +89,8 @@ class AsymmetricModelContract:
                 tokenizer.convert_tokens_to_ids(f"t{old_id}"), old_to_new[old_id]
             )
         self.assertEqual(tokenizer.eos_token_id, old_to_new[11])
-        self.assertEqual(model.config.eos_token_id, old_to_new[11])
+        token_config = getattr(model.config, "text_config", model.config)
+        self.assertEqual(token_config.eos_token_id, old_to_new[11])
 
         new_input_ids = torch.tensor(
             [[old_to_new[token_id] for token_id in old_input_ids[0].tolist()]]
@@ -128,9 +139,10 @@ class AsymmetricModelContract:
             self.assertTrue(saved_config["vocab_reordered"])
             self.assertNotIn("output_token_ids", saved_config)
             self.assertEqual(saved_config["output_vocab_size"], len(keep))
+            auto_class_name = self.auto_model_class.__name__
             self.assertIn(
                 "asymmetric_models.Asymmetric",
-                saved_config["auto_map"]["AutoModelForCausalLM"],
+                saved_config["auto_map"][auto_class_name],
             )
             self.assertTrue(
                 os.path.exists(os.path.join(output_dir, "asymmetric_models.py"))
@@ -139,7 +151,7 @@ class AsymmetricModelContract:
             loaded_tokenizer = AutoTokenizer.from_pretrained(
                 output_dir, local_files_only=True
             )
-            loaded = AutoModelForCausalLM.from_pretrained(
+            loaded = self.auto_model_class.from_pretrained(
                 output_dir, trust_remote_code=True, local_files_only=True
             ).eval()
             self.assertEqual(type(loaded).__name__, self.asymmetric_class.__name__)
@@ -178,6 +190,167 @@ class AsymmetricQwen2Test(AsymmetricModelContract, unittest.TestCase):
             pad_token_id=0,
         )
         return make_deterministic_model(Qwen2ForCausalLM(config))
+
+
+class AsymmetricQwen3Test(AsymmetricModelContract, unittest.TestCase):
+    asymmetric_class = AsymmetricQwen3ForCausalLM
+
+    def make_model(self):
+        config = Qwen3Config(
+            vocab_size=12,
+            hidden_size=16,
+            intermediate_size=32,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            num_key_value_heads=1,
+            head_dim=8,
+            max_position_embeddings=32,
+            tie_word_embeddings=True,
+            bos_token_id=2,
+            eos_token_id=11,
+            pad_token_id=0,
+        )
+        return make_deterministic_model(Qwen3ForCausalLM(config))
+
+    def test_qwen3_0_6b_production_shapes_on_meta_device(self):
+        config = Qwen3Config(
+            vocab_size=151936,
+            hidden_size=1024,
+            intermediate_size=3072,
+            num_hidden_layers=28,
+            num_attention_heads=16,
+            num_key_value_heads=8,
+            head_dim=128,
+            max_position_embeddings=40960,
+            tie_word_embeddings=False,
+        )
+        config.output_vocab_size = 5
+        config.vocab_reordered = True
+        with init_empty_weights():
+            model = AsymmetricQwen3ForCausalLM(config)
+
+        self.assertEqual(
+            tuple(model.get_input_embeddings().weight.shape), (151936, 1024)
+        )
+        self.assertEqual(tuple(model.get_output_embeddings().weight.shape), (5, 1024))
+
+
+class AsymmetricQwen3_5Test(AsymmetricModelContract, unittest.TestCase):
+    asymmetric_class = AsymmetricQwen3_5ForConditionalGeneration
+    auto_model_class = AutoModelForImageTextToText
+
+    def make_model(self):
+        text_config = Qwen3_5TextConfig(
+            vocab_size=12,
+            hidden_size=16,
+            intermediate_size=32,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            num_key_value_heads=1,
+            head_dim=8,
+            max_position_embeddings=32,
+            layer_types=["full_attention"],
+            linear_key_head_dim=4,
+            linear_value_head_dim=4,
+            linear_num_key_heads=2,
+            linear_num_value_heads=2,
+            rope_parameters={
+                "rope_type": "default",
+                "rope_theta": 10000,
+                "partial_rotary_factor": 0.75,
+                "mrope_section": [1, 1, 1],
+                "mrope_interleaved": True,
+            },
+            tie_word_embeddings=True,
+            bos_token_id=2,
+            eos_token_id=11,
+            pad_token_id=0,
+        )
+        vision_config = Qwen3_5VisionConfig(
+            depth=1,
+            hidden_size=16,
+            intermediate_size=32,
+            num_heads=2,
+            out_hidden_size=16,
+            num_position_embeddings=16,
+            patch_size=2,
+            spatial_merge_size=1,
+            temporal_patch_size=1,
+        )
+        config = Qwen3_5Config(
+            text_config=text_config,
+            vision_config=vision_config,
+            image_token_id=6,
+            video_token_id=8,
+            vision_start_token_id=9,
+            vision_end_token_id=10,
+            tie_word_embeddings=True,
+        )
+        return make_deterministic_model(
+            Qwen3_5ForConditionalGeneration(config)
+        )
+
+    def test_qwen3_5_0_8b_production_shapes_on_meta_device(self):
+        layer_types = [
+            "full_attention" if (index + 1) % 4 == 0 else "linear_attention"
+            for index in range(24)
+        ]
+        text_config = Qwen3_5TextConfig(
+            vocab_size=248320,
+            hidden_size=1024,
+            intermediate_size=3584,
+            num_hidden_layers=24,
+            num_attention_heads=8,
+            num_key_value_heads=2,
+            head_dim=256,
+            max_position_embeddings=262144,
+            layer_types=layer_types,
+            linear_conv_kernel_dim=4,
+            linear_key_head_dim=128,
+            linear_value_head_dim=128,
+            linear_num_key_heads=16,
+            linear_num_value_heads=16,
+            rope_parameters={
+                "rope_type": "default",
+                "rope_theta": 10000000,
+                "partial_rotary_factor": 0.25,
+                "mrope_section": [11, 11, 10],
+                "mrope_interleaved": True,
+            },
+            tie_word_embeddings=True,
+            eos_token_id=248044,
+        )
+        vision_config = Qwen3_5VisionConfig(
+            depth=12,
+            hidden_size=768,
+            intermediate_size=3072,
+            num_heads=12,
+            out_hidden_size=1024,
+            num_position_embeddings=2304,
+            patch_size=16,
+            spatial_merge_size=2,
+            temporal_patch_size=2,
+        )
+        config = Qwen3_5Config(
+            text_config=text_config,
+            vision_config=vision_config,
+            image_token_id=248056,
+            video_token_id=248057,
+            vision_start_token_id=248053,
+            vision_end_token_id=248054,
+            tie_word_embeddings=True,
+        )
+        config.output_vocab_size = 5
+        config.vocab_reordered = True
+        with init_empty_weights():
+            model = AsymmetricQwen3_5ForConditionalGeneration(config)
+
+        self.assertEqual(
+            tuple(model.get_input_embeddings().weight.shape), (248320, 1024)
+        )
+        self.assertEqual(tuple(model.get_output_embeddings().weight.shape), (5, 1024))
+        self.assertFalse(model.config.tie_word_embeddings)
+        self.assertFalse(model.config.text_config.tie_word_embeddings)
 
 
 class AsymmetricGemma3Test(AsymmetricModelContract, unittest.TestCase):
@@ -235,7 +408,10 @@ class AsymmetricGemma3Test(AsymmetricModelContract, unittest.TestCase):
 def make_deterministic_model(model):
     model.eval()
     with torch.no_grad():
-        values = torch.arange(12 * 16, dtype=torch.float32).reshape(12, 16)
+        rows, columns = model.get_input_embeddings().weight.shape
+        values = torch.arange(
+            rows * columns, dtype=torch.float32
+        ).reshape(rows, columns)
         model.get_input_embeddings().weight.copy_(values / 100)
     return model
 
